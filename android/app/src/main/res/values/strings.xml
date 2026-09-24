@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Kinnect</string>
+    <string name="title_activity_main">Kinnect</string>
+    <string name="package_name">com.kinnect.app</string>
+    <string name="custom_url_scheme">com.kinnect.app</string>
+</resources>

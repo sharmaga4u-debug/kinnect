@@ -17,7 +17,21 @@ export async function contactsPermission() {
 export async function requestContactsPermission() {
   if (!canReadContacts) return 'unavailable';
   try { return (await (await plugin()).requestPermissions()).contacts; }
-  catch { return 'denied'; }
+  catch (e) {
+    console.warn('[Contacts] permission request failed:', e?.message || e);
+    return 'denied';
+  }
+}
+
+// Android won't show the permission dialog again after "Don't allow", so send people to app settings
+export async function openAppSettings() {
+  if (!canReadContacts) return;
+  try {
+    const { NativeSettings, AndroidSettings } = await import('capacitor-native-settings');
+    await NativeSettings.openAndroid({ option: AndroidSettings.ApplicationDetails });
+  } catch (e) {
+    console.warn('[Contacts] could not open settings:', e?.message || e);
+  }
 }
 
 // [{ name, phones: [raw number strings] }]

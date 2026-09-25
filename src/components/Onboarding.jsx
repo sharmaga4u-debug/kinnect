@@ -218,7 +218,7 @@ export default function Onboarding() {
         </div>
       </div>
       {error && <p style={{ color: 'var(--c-red)', fontSize: '0.86rem', marginBottom: 10 }}>{error}</p>}
-      <button className="btn btn-primary btn-full btn-lg" disabled={busy} onClick={async () => { await requestContactsPermission(); finish(); }}>
+      <button className="btn btn-primary btn-full btn-lg" disabled={busy} onClick={async () => { setBusy(true); await requestContactsPermission(); finish(); }}>
         {busy ? 'Setting up…' : 'Allow contacts'}
       </button>
       <button onClick={finish} disabled={busy} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--c-muted)', fontWeight: 600, padding: 10, cursor: 'pointer' }}>

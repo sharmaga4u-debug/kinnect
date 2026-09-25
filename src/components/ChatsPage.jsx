@@ -8,7 +8,7 @@ import { useApp, personView, displayName, groupChatKey } from '../context/AppCon
 import { LANGUAGES } from '../utils/languageConfig';
 import { useSpeechToText } from '../hooks/useSpeechToText';
 import { useBackButton } from '../hooks/useBackButton';
-import { canReadContacts, requestContactsPermission } from '../services/contacts';
+import { canReadContacts, openAppSettings } from '../services/contacts';
 import { publicKeyFingerprint } from '../services/crypto';
 import { inviteMessage, whatsappLink, smsLink, shareText } from '../utils/invite';
 import { formatPhone, splitPhone } from '../utils/phone';
@@ -83,15 +83,7 @@ export default function ChatsPage() {
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search chats and people" />
       </label>
 
-      {needsContacts && (
-        <div className="notice" style={{ marginTop: 12, alignItems: 'center' }}>
-          <span style={{ fontSize: '1.5rem' }}>📇</span>
-          <span style={{ flex: 1 }}>See which of your contacts are on Kinnect.</span>
-          <button className="btn btn-primary btn-sm" onClick={async () => { await requestContactsPermission(); syncPhoneContacts(); }}>
-            Allow
-          </button>
-        </div>
-      )}
+      {needsContacts && <ContactsAccess style={{ marginTop: 12 }} />}
 
       {rows.length > 0 && (
         <>
@@ -288,9 +280,7 @@ function NewChatSheet({ onClose, onOpen }) {
       </label>
 
       {canReadContacts && contactsStatus !== 'granted' && contactsStatus !== 'limited' && (
-        <button className="pill-btn" style={{ marginTop: 12 }} onClick={async () => { await requestContactsPermission(); syncPhoneContacts(); }}>
-          📇 Allow contacts to find people
-        </button>
+        <ContactsAccess style={{ marginTop: 12 }} />
       )}
 
       <p className="section-label">On Kinnect · {onKinnect.length}</p>
@@ -321,6 +311,51 @@ function NewChatSheet({ onClose, onOpen }) {
         </>
       )}
     </Sheet>
+  );
+}
+
+/* "Allow contacts" prompt. If Android won't show the dialog (it was refused before),
+   explain how to turn it on and offer a shortcut to Kinnect's settings page. */
+export function ContactsAccess({ style }) {
+  const { askForContacts, syncPhoneContacts } = useApp();
+  const [state, setState] = useState('idle'); // idle | asking | denied
+  const waitingForSettings = useRef(false);
+
+  // Coming back from the settings page → check again
+  useEffect(() => {
+    const onVisible = async () => {
+      if (document.visibilityState !== 'visible' || !waitingForSettings.current) return;
+      waitingForSettings.current = false;
+      await syncPhoneContacts();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [syncPhoneContacts]);
+
+  if (state === 'denied') {
+    return (
+      <div className="notice" style={{ flexDirection: 'column', gap: 10, background: '#FFF7ED', borderColor: '#FED7AA', color: '#9A3412', ...style }}>
+        <span><strong>Contacts access is off.</strong> To turn it on: tap <strong>Open settings</strong> → <strong>Permissions</strong> → <strong>Contacts</strong> → <strong>Allow</strong>, then come back.</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary btn-sm" onClick={() => { waitingForSettings.current = true; openAppSettings(); }}>Open settings</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setState('idle')}>Not now</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="notice" style={{ alignItems: 'center', ...style }}>
+      <span style={{ fontSize: '1.5rem' }}>📇</span>
+      <span style={{ flex: 1 }}>See which of your contacts are on Kinnect.</span>
+      <button className="btn btn-primary btn-sm" disabled={state === 'asking'} onClick={async () => {
+        setState('asking');
+        const r = await askForContacts();
+        setState(r.status === 'granted' ? 'idle' : 'denied');
+      }}>
+        {state === 'asking' ? 'Checking…' : 'Allow'}
+      </button>
+    </div>
   );
 }
 

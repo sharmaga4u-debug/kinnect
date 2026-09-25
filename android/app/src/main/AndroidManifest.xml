@@ -43,4 +43,6 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- The contacts plugin requests read+write as one group; Kinnect only ever reads -->
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 </manifest>

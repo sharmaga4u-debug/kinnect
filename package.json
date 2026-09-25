@@ -20,6 +20,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.5.5",
     "canvas-confetti": "^1.9.4",
+    "capacitor-native-settings": "^8.2.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.43.0",
     "mqtt": "^5.16.0",

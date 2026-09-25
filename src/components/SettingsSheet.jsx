@@ -5,7 +5,7 @@ import { LANGUAGES } from '../utils/languageConfig';
 import { resizeImageToDataUrl } from '../utils/image';
 import { formatPhone } from '../utils/phone';
 import { inviteMessage, shareText } from '../utils/invite';
-import { canReadContacts, requestContactsPermission } from '../services/contacts';
+import { canReadContacts, openAppSettings } from '../services/contacts';
 import { checkPin } from '../utils/pin';
 import { APP_VERSION } from '../services/feedback';
 import Avatar from './Avatar';
@@ -16,7 +16,7 @@ export default function SettingsSheet({ onClose, onFeedback }) {
   const {
     user, updateProfile, deleteAccount, enableLock, disableLock,
     selectedLanguage, setSelectedLanguage, fontScale, setFontScale,
-    contactsStatus, syncPhoneContacts, kinnectContacts,
+    contactsStatus, syncPhoneContacts, askForContacts, kinnectContacts,
   } = useApp();
   const fileRef = useRef(null);
   const [editing, setEditing] = useState(false);
@@ -123,9 +123,17 @@ export default function SettingsSheet({ onClose, onFeedback }) {
       {/* Contacts */}
       {canReadContacts && (
         <button className="setting-row" onClick={async () => {
-          if (contactsStatus !== 'granted') await requestContactsPermission();
-          await syncPhoneContacts();
-          setNote('Contacts refreshed');
+          if (contactsStatus === 'granted' || contactsStatus === 'limited') {
+            const count = await syncPhoneContacts();
+            setNote(`Checked ${count} contacts`);
+            return;
+          }
+          const r = await askForContacts();
+          if (r.status === 'granted') setNote(`Checked ${r.count} contacts`);
+          else {
+            setNote('Contacts access is off. Opening settings: tap Permissions → Contacts → Allow.');
+            setTimeout(openAppSettings, 1200);
+          }
         }}>
           <Contact size={21} color="var(--c-primary)" />
           <span className="label">

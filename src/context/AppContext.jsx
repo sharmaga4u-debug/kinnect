@@ -4,7 +4,7 @@ import { storage } from '../services/storage';
 import {
   userIdForPhone, loadOrCreateIdentity, clearIdentity, newGroupKey, publicKeyFingerprint,
 } from '../services/crypto';
-import { canReadContacts, contactsPermission, readPhoneContacts } from '../services/contacts';
+import { canReadContacts, contactsPermission, readPhoneContacts, requestContactsPermission } from '../services/contacts';
 import { flushFeedback } from '../services/feedback';
 import { normalizePhone, splitPhone, formatPhone } from '../utils/phone';
 import { TOPICS } from '../data/topics';
@@ -218,10 +218,16 @@ export function AppProvider({ children }) {
     if (!me || !canReadContacts) return;
     const status = await contactsPermission();
     setContactsStatus(status);
-    if (status !== 'granted' && status !== 'limited') return;
+    if (status !== 'granted' && status !== 'limited') return 0;
 
     const { cc } = splitPhone(me.phone);
-    const raw = await readPhoneContacts();
+    let raw = [];
+    try {
+      raw = await readPhoneContacts();
+    } catch (e) {
+      console.warn('[Contacts] could not read contacts:', e?.message || e);
+      return 0;
+    }
     const byId = new Map();
     for (const c of raw) {
       for (const number of c.phones) {
@@ -245,7 +251,17 @@ export function AppProvider({ children }) {
       return next;
     });
     realtime.watchUsers(list.map(c => c.id));
+    return list.length;
   }, []);
+
+  // Ask for contacts permission (from any "Allow" button) and load them if granted
+  const askForContacts = useCallback(async () => {
+    const status = await requestContactsPermission();
+    setContactsStatus(status);
+    if (status !== 'granted' && status !== 'limited') return { status };
+    const count = await syncPhoneContacts();
+    return { status: 'granted', count };
+  }, [syncPhoneContacts]);
 
   // Add someone by typing their number
   const addByNumber = useCallback(async (rawNumber, name = '') => {
@@ -611,7 +627,7 @@ export function AppProvider({ children }) {
       locked, lockApp, unlockApp, enableLock, disableLock,
       realtimeConnected, peerId,
       activeTab, setActiveTab,
-      people, phoneContacts, kinnectContacts, contactsStatus, syncPhoneContacts, addByNumber,
+      people, phoneContacts, kinnectContacts, contactsStatus, syncPhoneContacts, askForContacts, addByNumber,
       groups, createGroup, addGroupMembers, leaveGroup,
       messagesByChat, chatList, activeChatId, setActiveChatId, openChat, sendMessage, totalUnreadChats,
       topics,

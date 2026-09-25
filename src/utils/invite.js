@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+
 // Public links. Inside the Android app window.location is https://localhost, so never use it for sharing.
 export const APP_URL = 'https://sharmaga4u-debug.github.io/kinnect/';
 export const APK_URL = 'https://github.com/sharmaga4u-debug/kinnect/releases/latest/download/kinnect.apk';
@@ -18,10 +20,23 @@ export function smsLink(phoneE164, text) {
   return `sms:${digits ? '+' + digits : ''}?body=${encodeURIComponent(text)}`;
 }
 
-// Generic share sheet, falling back to copying the text
+// Open the phone's share sheet. Android's in-app browser has no Web Share API, so the app
+// uses the native share plugin there; browsers without sharing fall back to copying the text.
 export async function shareText(text) {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { Share } = await import('@capacitor/share');
+      await Share.share({ title: 'Kinnect', text, dialogTitle: 'Share with' });
+      return 'shared';
+    } catch {
+      return 'cancelled';
+    }
+  }
   if (navigator.share) {
     try { await navigator.share({ title: 'Kinnect', text }); return 'shared'; } catch { return 'cancelled'; }
   }
   try { await navigator.clipboard.writeText(text); return 'copied'; } catch { return 'failed'; }
 }
+
+// Links to WhatsApp / SMS: in the app, open in the same view so Android hands them to the right app
+export const externalTarget = Capacitor.isNativePlatform() ? undefined : '_blank';

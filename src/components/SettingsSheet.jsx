@@ -165,7 +165,7 @@ export default function SettingsSheet({ onClose, onFeedback }) {
         </div>
       </div>
 
-      <button className="setting-row" onClick={() => shareText(inviteMessage(user.name))}>
+      <button className="setting-row" onClick={async () => { if ((await shareText(inviteMessage(user.name))) === 'copied') setNote('Invite copied. Paste it into WhatsApp or SMS.'); }}>
         <Share2 size={21} color="var(--c-emerald)" />
         <span className="label">Invite friends</span>
         <ChevronRight size={18} color="var(--c-muted)" />

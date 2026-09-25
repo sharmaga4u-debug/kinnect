@@ -12,7 +12,7 @@ import { speak, stopSpeaking, canSpeak } from '../utils/speech';
 import { useBackButton } from '../hooks/useBackButton';
 import { canReadContacts, openAppSettings } from '../services/contacts';
 import { publicKeyFingerprint } from '../services/crypto';
-import { inviteMessage, whatsappLink, smsLink, shareText } from '../utils/invite';
+import { inviteMessage, whatsappLink, smsLink, shareText, externalTarget } from '../utils/invite';
 import { formatPhone, splitPhone } from '../utils/phone';
 import NativeKeyboard from './NativeKeyboard';
 import Avatar from './Avatar';
@@ -438,7 +438,7 @@ export function InviteActions({ name, phone }) {
         Send {name.split(' ')[0]} a link to get Kinnect. Once they register with {formatPhone(phone)}, they'll appear in your chats.
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <a className="btn btn-green" href={whatsappLink(phone, text)} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+        <a className="btn btn-green" href={whatsappLink(phone, text)} target={externalTarget} rel="noreferrer" style={{ textDecoration: 'none' }}>
           <MessageCircle size={18} /> WhatsApp
         </a>
         <a className="btn btn-ghost" href={smsLink(phone, text)} style={{ textDecoration: 'none' }}>✉️ SMS</a>

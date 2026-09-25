@@ -117,6 +117,7 @@ export default function WisdomPage() {
 function ShareToChatSheet({ text, onClose }) {
   const { chatList, kinnectContacts, sendMessage } = useApp();
   const [sentTo, setSentTo] = useState(null);
+  const [note, setNote] = useState('');
 
   const chatted = new Set(chatList.map(r => r.key));
   const targets = [
@@ -126,12 +127,17 @@ function ShareToChatSheet({ text, onClose }) {
 
   return (
     <Sheet title="Share to…" onClose={onClose}>
-      <button className="list-row" onClick={() => shareText(text)}>
+      <button className="list-row" onClick={async () => {
+        const r = await shareText(text);
+        if (r === 'copied') setNote('Copied. Paste it into any app.');
+        else if (r === 'failed') setNote('Sharing is not available here.');
+      }}>
         <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--c-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Share2 size={20} />
         </div>
-        <span className="row-title">Other apps</span>
+        <span className="row-title">Other apps (WhatsApp, SMS…)</span>
       </button>
+      {note && <p style={{ color: 'var(--c-emerald)', fontSize: '0.86rem', margin: '4px 4px 8px' }}>{note}</p>}
       {targets.length > 0 && <p className="section-label">Send in Kinnect</p>}
       {targets.map(t => (
         <button key={t.key} className="list-row" disabled={sentTo === t.key} onClick={() => { sendMessage(t.key, text); setSentTo(t.key); setTimeout(onClose, 700); }}>

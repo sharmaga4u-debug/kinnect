@@ -1,366 +1,64 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { realtime } from '../services/realtime';
+import { storage } from '../services/storage';
+import {
+  userIdForPhone, loadOrCreateIdentity, clearIdentity, newGroupKey, publicKeyFingerprint,
+} from '../services/crypto';
+import { canReadContacts, contactsPermission, readPhoneContacts } from '../services/contacts';
+import { flushFeedback } from '../services/feedback';
+import { normalizePhone, splitPhone, formatPhone } from '../utils/phone';
+import { TOPICS } from '../data/topics';
 
-/* ──────────────────────────────────────────
-   Seed Contacts
-────────────────────────────────────────── */
-const SEED_CONTACTS = [
-  {
-    id: 'c1', name: 'Aarav Sharma', relation: 'Grandson', emoji: '👦',
-    avatarBg: '#DBEAFE', avatarColor: '#1E40AF',
-    city: 'London', country: 'UK', timezone: 'Europe/London',
-    phone: '+44 7700 900001',
-    statusText: 'At school until 3:30 PM',
-  },
-  {
-    id: 'c2', name: 'Priya Nair', relation: 'Daughter', emoji: '👩',
-    avatarBg: '#FCE7F3', avatarColor: '#9D174D',
-    city: 'Toronto', country: 'Canada', timezone: 'America/Toronto',
-    phone: '+1 416 555 0101',
-    statusText: 'Free for video call this evening',
-  },
-  {
-    id: 'c3', name: 'Riya Sharma', relation: 'Granddaughter', emoji: '👧',
-    avatarBg: '#DCFCE7', avatarColor: '#166534',
-    city: 'Bangalore', country: 'India', timezone: 'Asia/Kolkata',
-    phone: '+91 98765 43210',
-    statusText: 'Studying for exams',
-  },
-  {
-    id: 'c4', name: 'Dev Menon', relation: 'Son', emoji: '👨',
-    avatarBg: '#FEF3C7', avatarColor: '#92400E',
-    city: 'San Francisco', country: 'USA', timezone: 'America/Los_Angeles',
-    phone: '+1 415 555 0199',
-    statusText: 'In morning meetings',
-  },
+const ACCOUNT_KEY = 'kinnect_account_v2';
+const PREFS_KEY = 'kinnect_prefs';
+
+const AVATAR_PALETTE = [
+  ['#DBEAFE', '#1E40AF'], ['#FCE7F3', '#9D174D'], ['#DCFCE7', '#166534'],
+  ['#FEF3C7', '#92400E'], ['#EDE9FE', '#5B21B6'], ['#CFFAFE', '#155E75'],
 ];
 
-/* ──────────────────────────────────────────
-   Consolidated Topics with Daily Wisdom & Circles
-────────────────────────────────────────── */
-const RICH_TOPICS = [
-  {
-    id: 'bhagavad-gita',
-    title: 'Bhagavad Gita',
-    icon: '📿',
-    color: '#D97706',
-    bg: '#FFFBEB',
-    summary: 'Timeless spiritual wisdom, duty, and peace of mind.',
-    verse: {
-      source: 'Bhagavad Gita – Chapter 2, Verse 47',
-      sanskrit: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥',
-      transliteration: 'Karmaṇyevādhikāraste mā phaleṣu kadācana\nMā karmaphalahetur bhūr mā te saṅgo\'stvakarmaṇi',
-      meaning: 'You have a right to perform your prescribed duty, but not to the fruits of action. Never consider yourself the cause of results, and never be attached to inaction.',
-      words: [
-        { word: 'कर्मण्य (Karmaṇya)', meaning: 'in action / duty' },
-        { word: 'अधिकार (Adhikāra)', meaning: 'right / authority' },
-        { word: 'फल (Phala)', meaning: 'fruit / result' },
-        { word: 'कर्म (Karma)', meaning: 'action / deed' },
-      ],
-      insight: 'Practice doing everyday chores with devotion and love. Leave the worries of outcome to the universe.'
-    },
-    circles: [
-      { id: 'GRP-GITA-9021', name: 'Morning Gita Satsang', schedule: 'Daily 6:30 AM – 7:00 AM IST', members: 24, language: 'Hindi & English' },
-      { id: 'GRP-GITA-1044', name: 'Evening Gita Verses for Grandkids', schedule: 'Sat & Sun 5:00 PM IST', members: 16, language: 'English' }
-    ]
-  },
-  {
-    id: 'ramayana',
-    title: 'Ramayana & Moral Stories',
-    icon: '🏹',
-    color: '#16A34A',
-    bg: '#F0FDF4',
-    summary: 'Virtue, righteous living, courage, and loving family bonds.',
-    verse: {
-      source: 'Ramayana – Bala Kanda, 1.1.18',
-      sanskrit: 'रामो विग्रहवान् धर्मः साधुः सत्यपराक्रमः।\nराजा सर्वस्य लोकस्य देवानां मघवानिव॥',
-      transliteration: 'Rāmo vigranavān dharmaḥ sādhuḥ satyaparākramaḥ\nRājā sarvasya lokasya devānāṃ maghavāniva',
-      meaning: 'Rama is the very embodiment of righteousness, noble, virtuous, and of true valor. He protects and guides all with compassion.',
-      words: [
-        { word: 'राम (Rāma)', meaning: 'Lord Rama, ideal righteous leader' },
-        { word: 'धर्म (Dharma)', meaning: 'virtue, ethics, and duty' },
-        { word: 'सत्य (Satya)', meaning: 'truthfulness' },
-        { word: 'पराक्रम (Parākrama)', meaning: 'courage & inner strength' },
-      ],
-      insight: 'Stories of Rama and Sita inspire grandchildren to stand for kindness and respect towards elders.'
-    },
-    circles: [
-      { id: 'GRP-RAMA-4567', name: 'Ramayana Storytellers', schedule: 'Mon, Wed, Fri 8:00 PM IST', members: 18, language: 'Tamil & English' }
-    ]
-  },
-  {
-    id: 'yoga-wellness',
-    title: 'Yoga, Pranayama & Wellness',
-    icon: '🧘',
-    color: '#7C3AED',
-    bg: '#F5F3FF',
-    summary: 'Gentle morning asanas, breathing exercises, and natural vitality.',
-    verse: {
-      source: 'Patanjali Yoga Sutras 1.2',
-      sanskrit: 'योगश्चित्तवृत्तिनिरोधः॥',
-      transliteration: 'Yogaś citta-vṛtti-nirodhaḥ',
-      meaning: 'Yoga is the calming and stilling of the turbulent fluctuations of the mind.',
-      words: [
-        { word: 'योग (Yoga)', meaning: 'union / spiritual discipline' },
-        { word: 'चित्त (Citta)', meaning: 'consciousness / mind' },
-        { word: 'निरोध (Nirodha)', meaning: 'quietude / stilling' }
-      ],
-      insight: 'A 10-minute Anulom-Vilom (alternate nostril breathing) after morning bath rejuvenates heart and lung capacity.'
-    },
-    circles: [
-      { id: 'GRP-YOGA-2026', name: 'Gentle Chair Yoga & Pranayama for Elders', schedule: 'Daily 7:15 AM – 7:45 AM IST', members: 31, language: 'Hindi & English' }
-    ]
-  },
-  {
-    id: 'history-heritage',
-    title: 'Indian Heritage & Architecture',
-    icon: '🏛️',
-    color: '#2563EB',
-    bg: '#EFF6FF',
-    summary: 'Ancient temples, astronomy, classical literature, and festivals.',
-    verse: {
-      source: 'Maha Upanishad 6.71-73',
-      sanskrit: 'उदारचरितानां तु वसुधैव कुटुम्बकम्॥',
-      transliteration: 'Udāra-caritānāṁ tu vasudhaiva kuṭumbakam',
-      meaning: 'To the noble and magnanimous in heart, the entire world is one loving family.',
-      words: [
-        { word: 'उदार (Udāra)', meaning: 'generous / noble-minded' },
-        { word: 'वसुधा (Vasudhā)', meaning: 'mother earth' },
-        { word: 'कुटुम्बक (Kuṭumbaka)', meaning: 'loving family' }
-      ],
-      insight: 'Sharing stories of Tanjore Big Temple and Konark Sun Temple with grandkids abroad keeps roots vibrant.'
-    },
-    circles: [
-      { id: 'GRP-HIST-5520', name: 'Heritage Wonders & Grandkid Tales', schedule: 'Sunday 11:00 AM IST', members: 22, language: 'English' }
-    ]
-  },
-  {
-    id: 'classical-music',
-    title: 'Classical Music & Bhajans',
-    icon: '🎶',
-    color: '#DB2777',
-    bg: '#FDF2F8',
-    summary: 'Soothing ragas, Carnatic & Hindustani devotional compositions.',
-    verse: {
-      source: 'Thyagaraja Kriti – Nada Tanumanisham',
-      sanskrit: 'नादतनमनिशं शङ्करं नमामि मे मनसा शिरसा॥',
-      transliteration: 'Nāda-tanum-aniśaṁ śaṅkaraṁ namāmi me manasā śirasā',
-      meaning: 'I bow continuously in thought and devotion to Lord Shiva, whose very body is pure celestial divine sound (Nada).',
-      words: [
-        { word: 'नाद (Nāda)', meaning: 'divine cosmic sound' },
-        { word: 'तनु (Tanu)', meaning: 'embodiment / form' },
-        { word: 'मनसा (Manasā)', meaning: 'with whole mind & heart' }
-      ],
-      insight: 'Listening to morning Raga Bhupali or Bilawal creates positive vibrations throughout your living room.'
-    },
-    circles: [
-      { id: 'GRP-MUSIC-7890', name: 'Morning Bhajans & Stotras Circle', schedule: 'Daily 6:00 AM IST', members: 42, language: 'All Languages' }
-    ]
-  },
-  {
-    id: 'cooking-ayurveda',
-    title: 'Traditional Cooking & Ayurveda',
-    icon: '🍲',
-    color: '#EA580C',
-    bg: '#FFF7ED',
-    summary: 'Grandmother secrets, medicinal herbs, healing spices, and seasonal thalis.',
-    verse: {
-      source: 'Charaka Samhita – Sutrasthana',
-      sanskrit: 'आहारसम्भवं वस्तु रोगाश्चाहारसम्भावाः॥',
-      transliteration: 'Āhāra-sambhavaṁ vastu rogāścāhāra-sambhavāḥ',
-      meaning: 'Health, strength, and vitality are born of wholesome food, just as illness arises from improper diet.',
-      words: [
-        { word: 'आहार (Āhāra)', meaning: 'wholesome food / nourishment' },
-        { word: 'सम्भव (Sambhava)', meaning: 'originating from' },
-        { word: 'आरोग्य (Ārogya)', meaning: 'freedom from disease' }
-      ],
-      insight: 'Teach your grandchildren how golden turmeric, black pepper, and warm ghee heal colds naturally.'
-    },
-    circles: [
-      { id: 'GRP-COOK-3312', name: 'Nani’s Kitchen & Herbal Remedies', schedule: 'Saturday 4:00 PM IST', members: 29, language: 'Hindi & English' }
-    ]
-  },
-  {
-    id: 'science-nature',
-    title: 'Science & Curious Grandkids',
-    icon: '🔬',
-    color: '#0891B2',
-    bg: '#ECFEFF',
-    summary: 'Stars, space travel, flora & fauna, and playful scientific puzzles.',
-    verse: {
-      source: 'Rig Veda 1.164.46',
-      sanskrit: 'एकं सद्विप्रा बहुधा वदन्ति॥',
-      transliteration: 'Ekaṁ sad viprā bahudhā vadanti',
-      meaning: 'Truth is one; wise scientists and seekers perceive and describe it in multiple beautiful ways.',
-      words: [
-        { word: 'एकम् (Ekam)', meaning: 'one absolute truth' },
-        { word: 'सत् (Sat)', meaning: 'eternal truth / reality' },
-        { word: 'विप्राः (Viprāḥ)', meaning: 'wise thinkers & scholars' }
-      ],
-      insight: 'Fun questions to ask grandkids: How do plants know when spring has arrived? Why is the sunset golden red?'
-    },
-    circles: [
-      { id: 'GRP-SCI-8190', name: 'Curious Kids & Grandparents Space Club', schedule: 'Sunday 6:00 PM IST', members: 19, language: 'English' }
-    ]
-  }
-];
+function paletteFor(id = '') {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}
 
-/* ──────────────────────────────────────────
-   Seed Chats & Messages
-────────────────────────────────────────── */
-const SEED_CHATS = {
-  'family-group': {
-    id: 'family-group',
-    name: 'Sharma Family 🏡',
-    avatar: '🏡',
-    avatarBg: '#FEF3C7',
-    avatarColor: '#B45309',
-    relation: '5 family members',
-    unread: 0,
-    messages: [
-      { id: 'm1', senderName: 'Priya Nair', text: 'Good morning everyone! Hope Dadi and Dad are having a warm start to the day. ❤️', time: '8:15 AM', isMe: false },
-      { id: 'm2', senderName: 'Aarav Sharma', text: 'Dadi!! I scored 1st prize in the Science fair today in London! 🏆', time: '8:42 AM', isMe: false },
-      { id: 'm3', senderName: 'You', text: 'Jeete raho beta! So proud of you Aarav! Bhagwan bless you with wisdom and joy. 🙏✨', time: '8:45 AM', isMe: true },
-      { id: 'm4', senderName: 'Dev Menon', text: 'Way to go Aarav! Sending sweets from San Francisco! 🍬', time: '9:05 AM', isMe: false },
-      { id: 'm5', senderName: 'Riya Sharma', text: 'Nani, did you light the evening lamp yet? Calling you at 6:30 PM!', time: '9:20 AM', isMe: false },
-    ]
-  },
-  'c1': {
-    id: 'c1',
-    name: 'Aarav Sharma',
-    avatar: '👦',
-    avatarBg: '#DBEAFE',
-    avatarColor: '#1E40AF',
-    relation: 'Grandson · London',
-    unread: 0,
-    messages: [
-      { id: 'm10', senderName: 'Aarav Sharma', text: 'Hey Dadi! Did you see the cherry blossom video I sent in the memories album?', time: 'Yesterday', isMe: false },
-      { id: 'm11', senderName: 'You', text: 'Yes beta, it looked like paradise! Reminded me of Kashmir trips with your grandfather.', time: 'Yesterday', isMe: true },
-      { id: 'm12', senderName: 'Aarav Sharma', text: 'Can you teach me the next Gita verse this Saturday on video call? 📖', time: '10:14 AM', isMe: false },
-    ]
-  },
-  'c2': {
-    id: 'c2',
-    name: 'Priya Nair',
-    avatar: '👩',
-    avatarBg: '#FCE7F3',
-    avatarColor: '#9D174D',
-    relation: 'Daughter · Toronto',
-    unread: 0,
-    messages: [
-      { id: 'm20', senderName: 'Priya Nair', text: 'Namaste Ma! Did you take your morning walking routine and knee exercises today?', time: '7:30 AM', isMe: false },
-      { id: 'm21', senderName: 'You', text: 'Yes Priya beta, did 20 minutes of garden walk and pranayama. Feeling fresh!', time: '7:40 AM', isMe: true },
-      { id: 'm22', senderName: 'Priya Nair', text: 'Wonderful! Sending you photos of the autumn leaves here in Toronto.', time: '7:45 AM', isMe: false },
-    ]
-  },
-  'c3': {
-    id: 'c3',
-    name: 'Riya Sharma',
-    avatar: '👧',
-    avatarBg: '#DCFCE7',
-    avatarColor: '#166534',
-    relation: 'Granddaughter · Bangalore',
-    unread: 0,
-    messages: [
-      { id: 'm30', senderName: 'Riya Sharma', text: 'Nani! The ginger pickle you sent with Chachu arrived! It is SO delicious! 😋', time: 'Yesterday', isMe: false },
-      { id: 'm31', senderName: 'You', text: 'Make sure you eat it with hot parathas! Have you started preparing for board exams?', time: 'Yesterday', isMe: true },
-      { id: 'm32', senderName: 'Riya Sharma', text: 'Yes Nani! I recite the Gayatri mantra before opening my math books, just like you taught me! ❤️', time: '11:02 AM', isMe: false },
-    ]
-  },
-  'c4': {
-    id: 'c4',
-    name: 'Dev Menon',
-    avatar: '👨',
-    avatarBg: '#FEF3C7',
-    avatarColor: '#92400E',
-    relation: 'Son · San Francisco',
-    unread: 0,
-    messages: [
-      { id: 'm40', senderName: 'Dev Menon', text: 'Hi Maa, how is the weather in Delhi today? Hope you have turned on the warm heater.', time: 'Yesterday', isMe: false },
-      { id: 'm41', senderName: 'You', text: 'Mild sunny winter here Dev. Eat home-cooked food and don’t skip your lunch in office.', time: 'Yesterday', isMe: true },
-      { id: 'm42', senderName: 'Dev Menon', text: 'Promise! Will call you on Sunday 8:00 AM your time so we can chat peacefully.', time: 'Yesterday', isMe: false },
-    ]
-  }
-};
+export const groupChatKey = (groupId) => `g:${groupId}`;
 
-/* ──────────────────────────────────────────
-   Seed Community Posts
-────────────────────────────────────────── */
-const SEED_COMMUNITY_POSTS = [
-  {
-    id: 'p1',
-    author: 'Riya Sharma',
-    authorRelation: 'Granddaughter · Bangalore',
-    avatar: '👧',
-    avatarBg: '#DCFCE7',
-    avatarColor: '#166534',
-    time: '2 hours ago',
-    tag: 'Diwali & Celebrations 🪔',
-    category: 'family',
-    title: 'Lit 21 Diyas for Peace & Family Health',
-    content: 'We lit diyas all across our veranda in Bangalore! Dedicated the first diya to Nani and Nana ji. Wishing everyone immense joy and sound health across all time zones!',
-    likes: 14,
-    hasLiked: false,
-    comments: [
-      { id: 'c101', author: 'Priya Nair', text: 'So proud of you Riya beta! Looks truly peaceful.', time: '1 hour ago' },
-      { id: 'c102', author: 'Aarav Sharma', text: 'Save some sweets for when we visit India! 😋', time: '45 mins ago' }
-    ]
-  },
-  {
-    id: 'p2',
-    author: 'Aarav Sharma',
-    authorRelation: 'Grandson · London',
-    avatar: '👦',
-    avatarBg: '#DBEAFE',
-    avatarColor: '#1E40AF',
-    time: '5 hours ago',
-    tag: 'Milestone & Pride 🏆',
-    category: 'family',
-    title: 'First Prize in London School Science Exhibition!',
-    content: 'Our working model on Renewable Solar Irrigation won 1st prize today! Dadi spent 20 minutes with me on video call yesterday explaining how farmers in Punjab use canal waters. Her wisdom was the highlight of our presentation!',
-    likes: 22,
-    hasLiked: true,
-    comments: [
-      { id: 'c201', author: 'Dev Menon', text: 'Brilliant work Aarav! That canal example was genius.', time: '3 hours ago' }
-    ]
-  },
-  {
-    id: 'p3',
-    author: 'Morning Gita Satsang Circle',
-    authorRelation: 'Spiritual Community · 24 Elders',
-    avatar: '📿',
-    avatarBg: '#FEF3C7',
-    avatarColor: '#92400E',
-    time: 'Today 6:45 AM',
-    tag: 'Daily Reflection 📖',
-    category: 'spiritual',
-    title: 'Verse of the Day: Performing Duty with a Joyful Heart',
-    content: '“Focus wholeheartedly on your seva and duty, free from anxiety about future outcomes.” When we prepare morning breakfast or call our children, let it be an offering of unconditional love. Have a tranquil day, everyone!',
-    likes: 35,
-    hasLiked: false,
-    comments: [
-      { id: 'c301', author: 'Rajesh Kumar', text: 'Hari Om. Such peaceful thoughts to start the morning.', time: '5 hours ago' }
-    ]
-  },
-  {
-    id: 'p4',
-    author: 'Priya Nair',
-    authorRelation: 'Daughter · Toronto',
-    avatar: '👩',
-    avatarBg: '#FCE7F3',
-    avatarColor: '#9D174D',
-    time: 'Yesterday',
-    tag: 'Kitchen Memories 🍲',
-    category: 'family',
-    title: 'Made Maa’s Special Ginger-Cardamom Masala Tea',
-    content: 'It’s 4°C outside in Toronto, but our kitchen smells just like home. Brewed fresh ginger, crushed green cardamom, and a pinch of cinnamon following Maa’s handwritten recipe. Warm hugs to everyone back home!',
-    likes: 19,
-    hasLiked: false,
-    comments: [
-      { id: 'c401', author: 'Riya Sharma', text: 'Bua, please post the exact measurements! Mine never turns out as spicy.', time: 'Yesterday' }
-    ]
-  }
-];
+// Name to show for a person: what *you* saved them as, else the name they chose, else their number
+export function displayName(person) {
+  if (!person) return 'Unknown';
+  return person.contactName || person.profile?.name || formatPhone(person.phone) || 'Kinnect user';
+}
+
+// Shape used by avatars, call screens and profile sheets
+export function personView(person) {
+  const [avatarBg, avatarColor] = paletteFor(person.id);
+  return {
+    id: person.id,
+    name: displayName(person),
+    emoji: person.profile?.avatar || '🙂',
+    photo: person.profile?.photo || '',
+    about: person.profile?.about || '',
+    timezone: person.profile?.tz || 'UTC',
+    phone: person.phone || '',
+    registered: !!person.registered,
+    avatarBg, avatarColor,
+  };
+}
+
+function loadJson(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; }
+  catch { return fallback; }
+}
+
+function newMessageId() {
+  return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function clockTime(ts) {
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 /* ──────────────────────────────────────────
    Context Setup
@@ -368,329 +66,531 @@ const SEED_COMMUNITY_POSTS = [
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
-  // Check saved session, or start null so user sees the login screen
-  const [user, setUserState] = useState(() => {
-    try {
-      const saved = localStorage.getItem('kinnect_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [user, setUserState] = useState(() => loadJson(ACCOUNT_KEY, null));
+  const [locked, setLocked] = useState(() => !!loadJson(ACCOUNT_KEY, null)?.pinHash);
 
-  const [familyCode, setFamilyCodeState] = useState(() => {
-    return localStorage.getItem('kinnect_family_code') || 'sharma-family';
-  });
+  const prefs = loadJson(PREFS_KEY, {});
+  const [fontScale, setFontScaleState] = useState(prefs.fontScale || 'normal'); // 'normal' | 'large' | 'xlarge'
+  const [selectedLanguage, setSelectedLanguageState] = useState(prefs.language || 'en');
 
-  const setFamilyCode = useCallback((code) => {
-    const clean = (code || 'sharma-family').toLowerCase().replace(/[^a-z0-9-_]/g, '');
-    setFamilyCodeState(clean);
-    localStorage.setItem('kinnect_family_code', clean);
-    if (user) {
-      realtime.init(user, clean);
-    }
-  }, [user]);
-
-  const setUser = useCallback((newUser) => {
-    setUserState(newUser);
-    try {
-      if (newUser) {
-        localStorage.setItem('kinnect_user', JSON.stringify(newUser));
-        realtime.init(newUser, familyCode);
-      } else {
-        localStorage.removeItem('kinnect_user');
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }, [familyCode]);
-
-  const logout = useCallback(() => {
-    setUser(null);
-  }, [setUser]);
-
-  const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'calls' | 'community' | 'wisdom' | 'album'
-  const [contacts] = useState(SEED_CONTACTS);
-  const [topics] = useState(RICH_TOPICS);
-  const [chats, setChats] = useState(SEED_CHATS);
-  const [activeChatId, setActiveChatId] = useState('family-group');
-  const [communityPosts, setCommunityPosts] = useState(SEED_COMMUNITY_POSTS);
+  const [activeTab, setActiveTab] = useState('chats');
+  const [people, setPeople] = useState({});          // id → person
+  const [phoneContacts, setPhoneContacts] = useState([]); // everyone in the phone book, for invites
+  const [contactsStatus, setContactsStatus] = useState(canReadContacts ? 'unknown' : 'unavailable');
+  const [groups, setGroups] = useState({});          // id → group
+  const [messagesByChat, setMessagesByChat] = useState({});
+  const [unreadByChat, setUnreadByChat] = useState({});
+  const [activeChatId, setActiveChatIdState] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [peerId, setPeerId] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
-  const [fontScale, setFontScale] = useState('normal'); // 'normal' | 'large' | 'xlarge'
-  const [selectedLanguage, setSelectedLanguage] = useState('hi');
-  const [storageMode, setStorageMode] = useState('archive');
+  const [topics] = useState(TOPICS);
 
-  // Pre-seeded family feedback
-  const [feedbackList, setFeedbackList] = useState([
-    {
-      id: 'fb-1',
-      memberName: 'Priya Nair (Toronto)',
-      rating: 5,
-      text: 'The large text toggle and direct chat window are so helpful for Maa! She was able to voice message us easily.',
-      date: 'Today',
-      language: 'Hindi'
-    },
-    {
-      id: 'fb-2',
-      memberName: 'Aarav Sharma (London)',
-      rating: 5,
-      text: 'Love learning the Gita verses with Dadi in one tab! The audio pronunciation button is super cool.',
-      date: 'Yesterday',
-      language: 'English'
-    }
-  ]);
+  // Refs so realtime listeners always see current values without re-subscribing
+  const userRef = useRef(user);
+  const peopleRef = useRef(people);
+  const groupsRef = useRef(groups);
+  const activeChatRef = useRef(activeChatId);
+  const seenIdsRef = useRef({}); // chatKey → Set of message ids already stored
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { peopleRef.current = people; }, [people]);
+  useEffect(() => { groupsRef.current = groups; }, [groups]);
+  useEffect(() => { activeChatRef.current = activeChatId; }, [activeChatId]);
+  // Never reopen straight into a conversation after the lock screen
+  useEffect(() => { if (locked) setActiveChatIdState(null); }, [locked]);
 
-  const submitFeedback = useCallback((newFb) => {
-    const item = {
-      id: 'fb-' + Date.now(),
-      date: 'Just now',
-      ...newFb
-    };
-    setFeedbackList(prev => [item, ...prev]);
-  }, []);
+  /* ── Preferences ──────────────────────────────────────────── */
+  const savePrefs = (patch) => {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ ...loadJson(PREFS_KEY, {}), ...patch })); } catch (_) {}
+  };
+  const setFontScale = useCallback((v) => { setFontScaleState(v); savePrefs({ fontScale: v }); }, []);
+  const setSelectedLanguage = useCallback((v) => { setSelectedLanguageState(v); savePrefs({ language: v }); }, []);
 
-  // Snippets/video messages
-  const [snippets, setSnippets] = useState([
-    {
-      id: 'sn1', from: 'Aarav Sharma', emoji: '👦', duration: '0:42',
-      time: '2 hours ago', thumbnail: '🎥', message: 'Hey Dadi! Watch my school play clip!',
-      watched: false
-    },
-    {
-      id: 'sn2', from: 'Riya Sharma', emoji: '👧', duration: '1:05',
-      time: 'Yesterday', thumbnail: '📸', message: 'Happy Diwali from Bangalore! We lit 21 diyas!',
-      watched: true
-    },
-  ]);
-
-  // Joined circle IDs
-  const [joinedCircleIds, setJoinedCircleIds] = useState(['GRP-GITA-9021', 'GRP-RAMA-4567']);
-
-  // Apply font scale to body class
   useEffect(() => {
     document.body.classList.remove('font-large', 'font-xlarge');
     if (fontScale === 'large') document.body.classList.add('font-large');
     if (fontScale === 'xlarge') document.body.classList.add('font-xlarge');
   }, [fontScale]);
 
-  // Initialize Realtime Service when user is present
-  useEffect(() => {
-    if (!user) return;
+  /* ── Account ──────────────────────────────────────────────── */
+  const persistUser = useCallback((u) => {
+    setUserState(u);
+    try {
+      if (u) localStorage.setItem(ACCOUNT_KEY, JSON.stringify(u));
+      else localStorage.removeItem(ACCOUNT_KEY);
+    } catch (_) {}
+  }, []);
 
-    realtime.init(user, familyCode);
-
-    const unsubStatus = realtime.on('connection_status', ({ connected }) => {
-      setRealtimeConnected(connected);
-    });
-
-    const unsubPeer = realtime.on('peer_ready', ({ peerId }) => {
-      setPeerId(peerId);
-    });
-
-    // Handle real-time chat messages from other devices
-    const unsubChat = realtime.on('chat_message', (incomingMsg) => {
-      const targetChatId = incomingMsg.chatId === 'family-group' 
-        ? 'family-group' 
-        : (incomingMsg.senderId === user.id ? incomingMsg.chatId : incomingMsg.senderId);
-
-      setChats(prev => {
-        const currentChat = prev[targetChatId] || prev['family-group'];
-        if (!currentChat) return prev;
-
-        // Prevent duplicate messages
-        if (currentChat.messages.some(m => m.id === incomingMsg.id)) {
-          return prev;
-        }
-
-        const formattedMsg = {
-          id: incomingMsg.id,
-          senderName: incomingMsg.senderName,
-          text: incomingMsg.text,
-          time: incomingMsg.time,
-          isMe: false,
-          type: incomingMsg.type || 'text',
-          audioUrl: incomingMsg.audioUrl,
-          audioDuration: incomingMsg.audioDuration,
-          imageUrl: incomingMsg.imageUrl
-        };
-
-        return {
-          ...prev,
-          [targetChatId]: {
-            ...currentChat,
-            messages: [...currentChat.messages, formattedMsg],
-            unread: activeChatId === targetChatId ? 0 : (currentChat.unread || 0) + 1
-          }
-        };
-      });
-    });
-
-    // Handle incoming video/audio call
-    const unsubCall = realtime.on('incoming_call', (callData) => {
-      // Don't ring self
-      if (callData.caller?.id === user.id) return;
-      setIncomingCall(callData);
-    });
-
-    // Handle call response
-    const unsubCallAccepted = realtime.on('call_accepted', (callData) => {
-      console.log('[App] Remote family member answered call:', callData);
-    });
-
-    const unsubCallEnded = realtime.on('call_ended', () => {
-      setActiveCall(null);
-      setIncomingCall(null);
-      setRemoteStream(null);
-    });
-
-    return () => {
-      unsubStatus();
-      unsubPeer();
-      unsubChat();
-      unsubCall();
-      unsubCallAccepted();
-      unsubCallEnded();
+  const createAccount = useCallback(async ({ phone, name, avatar, photo }) => {
+    await loadOrCreateIdentity();
+    const account = {
+      id: await userIdForPhone(phone),
+      phone,
+      name: name.trim(),
+      avatar: avatar || '🙂',
+      photo: photo || '',
+      about: '',
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      createdAt: Date.now(),
     };
-  }, [user, familyCode, activeChatId]);
+    persistUser(account);
+    setLocked(false);
+    return account;
+  }, [persistUser]);
 
-  // Direct navigation to open a specific contact's chat
-  const openChat = useCallback((contactOrChatId) => {
-    setActiveTab('chats');
-    setActiveChatId(contactOrChatId);
-    // Mark as read
-    setChats(prev => {
-      if (!prev[contactOrChatId]) return prev;
-      return {
-        ...prev,
-        [contactOrChatId]: { ...prev[contactOrChatId], unread: 0 }
-      };
+  const updateProfile = useCallback((patch) => {
+    const updated = { ...userRef.current, ...patch };
+    persistUser(updated);
+    realtime.currentUser = updated;
+    realtime.publishProfile(updated);
+  }, [persistUser]);
+
+  // Remove the account and everything stored on this phone
+  const deleteAccount = useCallback(async () => {
+    const me = userRef.current;
+    if (me) realtime.clearProfile(me.id);
+    await new Promise(r => setTimeout(r, 400)); // let the broker receive the removal
+    realtime.disconnect();
+    await storage.clearAll();
+    clearIdentity();
+    ['kinnect_device_id', PREFS_KEY].forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+    setLocked(false);
+    persistUser(null);
+  }, [persistUser]);
+
+  /* ── App lock (optional) ──────────────────────────────────── */
+  const enableLock = useCallback((pinHash) => updateProfile({ pinHash }), [updateProfile]);
+  const disableLock = useCallback(() => updateProfile({ pinHash: null }), [updateProfile]);
+  const lockApp = useCallback(() => { if (userRef.current?.pinHash) setLocked(true); }, []);
+  const unlockApp = useCallback(() => setLocked(false), []);
+
+  // Re-lock when the app has been in the background for a while
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+      } else if (hiddenAt && Date.now() - hiddenAt > 30000 && userRef.current?.pinHash) {
+        setLocked(true);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  /* ── People ───────────────────────────────────────────────── */
+
+  // Merge changes into a person and save them (only people worth remembering are saved)
+  const upsertPerson = useCallback((id, patch) => {
+    if (!id || id === userRef.current?.id) return;
+    setPeople(prev => {
+      const current = prev[id] || { id, kind: 'person' };
+      const next = { ...current, ...(typeof patch === 'function' ? patch(current) : patch) };
+      if (next.registered || next.source !== 'contacts') storage.saveMember(next);
+      return { ...prev, [id]: next };
     });
   }, []);
 
-  // Send a message in active or target chat (Local + Realtime Broadcast)
-  const sendMessage = useCallback((chatId, text, type = 'text', media = {}) => {
-    if (!text && !media.audioDuration && !media.imageUrl) return;
+  // Add a system note (e.g. "security code changed") to a chat
+  const addSystemNote = useCallback((chatKey, text, ts = Date.now()) => {
+    const me = userRef.current;
+    const note = { id: newMessageId(), chatKey, senderId: 'system', senderName: '', text, type: 'system', time: clockTime(ts), timestamp: ts, isMe: false, status: 'system' };
+    (seenIdsRef.current[chatKey] ||= new Set()).add(note.id);
+    setMessagesByChat(prev => ({ ...prev, [chatKey]: [...(prev[chatKey] || []), note].sort((a, b) => a.timestamp - b.timestamp) }));
+    if (me) storage.saveMessage(`${me.id}-${chatKey}`, note);
+  }, []);
 
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const localId = 'msg-' + Date.now();
-
-    const newMsg = {
-      id: localId,
-      senderName: user ? user.name : 'You',
-      text: text || '',
-      time: timeStr,
-      isMe: true,
-      type,
-      ...media
-    };
-
-    // Update local state immediately
-    setChats(prev => {
-      const currentChat = prev[chatId];
-      if (!currentChat) return prev;
-      return {
-        ...prev,
-        [chatId]: {
-          ...currentChat,
-          messages: [...currentChat.messages, newMsg]
-        }
-      };
-    });
-
-    // Broadcast across devices in real-time
-    realtime.sendChatMessage({
-      chatId,
-      text,
-      type,
-      media
-    });
-
-    // Optional warm fallback reply if chatting with bot contact and alone
-    if (!realtime.isConnected && (chatId.startsWith('c') || chatId === 'family-group')) {
-      setTimeout(() => {
-        let replyText = 'Thank you! Sent you my love ❤️';
-        let sender = 'Family';
-
-        if (chatId === 'c1') {
-          sender = 'Aarav Sharma';
-          replyText = 'Love you Dadi! Can’t wait to video call you this weekend! 👦🎒';
-        } else if (chatId === 'c2') {
-          sender = 'Priya Nair';
-          replyText = 'Namaste Ma! Just finished lunch. Take your herbal tea and rest well today! ☕❤️';
-        } else if (chatId === 'c3') {
-          sender = 'Riya Sharma';
-          replyText = 'Got your message Nani! Sending you warm hugs and sweets from Bangalore! 🪔✨';
-        } else if (chatId === 'c4') {
-          sender = 'Dev Menon';
-          replyText = 'Thanks Maa! Please don’t take any strain. I will ring you early Sunday morning. 🙏';
-        } else if (chatId === 'family-group') {
-          sender = 'Priya Nair';
-          replyText = 'So true! Let’s all get together on a family video call this Sunday evening! 👨‍👩‍👧‍👦';
-        }
-
-        const autoReply = {
-          id: 'reply-' + Date.now(),
-          senderName: sender,
-          text: replyText,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isMe: false,
-          type: 'text'
-        };
-
-        setChats(prev => {
-          const currentChat = prev[chatId];
-          if (!currentChat) return prev;
-          return {
-            ...prev,
-            [chatId]: {
-              ...currentChat,
-              messages: [...currentChat.messages, autoReply]
-            }
-          };
-        });
-      }, 1600);
+  // A directory profile arrived (someone is on Kinnect) or changed
+  const applyProfile = useCallback((profile) => {
+    const known = peopleRef.current[profile.id];
+    const oldKey = known?.profile?.pub;
+    if (oldKey && profile.pub && publicKeyFingerprint(oldKey) !== publicKeyFingerprint(profile.pub) && messagesByChatRef.current[profile.id]?.length) {
+      addSystemNote(profile.id, `🔐 ${displayName(known)}'s security key changed. They may have reinstalled Kinnect.`);
     }
-  }, [user]);
+    upsertPerson(profile.id, { registered: true, profile });
+  }, [upsertPerson, addSystemNote]);
 
-  // Start Call (Video / Audio)
+  // Read the phone book and look up which contacts are on Kinnect
+  const syncPhoneContacts = useCallback(async () => {
+    const me = userRef.current;
+    if (!me || !canReadContacts) return;
+    const status = await contactsPermission();
+    setContactsStatus(status);
+    if (status !== 'granted' && status !== 'limited') return;
+
+    const { cc } = splitPhone(me.phone);
+    const raw = await readPhoneContacts();
+    const byId = new Map();
+    for (const c of raw) {
+      for (const number of c.phones) {
+        const phone = normalizePhone(number, cc || '91');
+        if (!phone || phone === me.phone) continue;
+        const id = await userIdForPhone(phone);
+        if (!byId.has(id)) byId.set(id, { id, name: c.name || formatPhone(phone), phone });
+      }
+    }
+    const list = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+    setPhoneContacts(list);
+
+    // Keep saved names in sync with the phone book, then follow everyone's directory record
+    setPeople(prev => {
+      const next = { ...prev };
+      for (const c of list) {
+        const current = next[c.id] || { id: c.id, kind: 'person', source: 'contacts' };
+        next[c.id] = { ...current, contactName: c.name, phone: c.phone };
+        if (next[c.id].registered || next[c.id].source !== 'contacts') storage.saveMember(next[c.id]);
+      }
+      return next;
+    });
+    realtime.watchUsers(list.map(c => c.id));
+  }, []);
+
+  // Add someone by typing their number
+  const addByNumber = useCallback(async (rawNumber, name = '') => {
+    const me = userRef.current;
+    const { cc } = splitPhone(me.phone);
+    const phone = normalizePhone(rawNumber, cc || '91');
+    if (!phone) return { error: 'Please enter a valid mobile number.' };
+    if (phone === me.phone) return { error: 'That is your own number.' };
+    const id = await userIdForPhone(phone);
+    upsertPerson(id, (p) => ({ phone, contactName: name.trim() || p.contactName || '', source: p.source === 'contacts' ? 'contacts' : 'manual' }));
+    realtime.watchUsers([id]);
+    const profile = await realtime.waitForProfile(id, 6000);
+    if (profile) applyProfile(profile);
+    return { id, phone, registered: !!profile };
+  }, [upsertPerson, applyProfile]);
+
+  /* ── Messages ─────────────────────────────────────────────── */
+  const messagesByChatRef = useRef(messagesByChat);
+  useEffect(() => { messagesByChatRef.current = messagesByChat; }, [messagesByChat]);
+
+  const storeMessage = useCallback((chatKey, msg, { countUnread = true } = {}) => {
+    const me = userRef.current;
+    if (!me) return false;
+    const seen = (seenIdsRef.current[chatKey] ||= new Set());
+    if (seen.has(msg.id)) return false;
+    seen.add(msg.id);
+    setMessagesByChat(prev => {
+      const list = prev[chatKey] || [];
+      const next = [...list, msg];
+      if (list.length && list[list.length - 1].timestamp > msg.timestamp) next.sort((a, b) => a.timestamp - b.timestamp);
+      return { ...prev, [chatKey]: next };
+    });
+    storage.saveMessage(`${me.id}-${chatKey}`, msg);
+    if (countUnread && !msg.isMe && activeChatRef.current !== chatKey) {
+      setUnreadByChat(prev => ({ ...prev, [chatKey]: (prev[chatKey] || 0) + 1 }));
+    }
+    return true;
+  }, []);
+
+  const setMessageStatus = useCallback((chatKey, ids, status) => {
+    const me = userRef.current;
+    const idSet = new Set(ids);
+    setMessagesByChat(prev => {
+      const list = prev[chatKey];
+      if (!list) return prev;
+      let changed = false;
+      const next = list.map(m => {
+        if (!idSet.has(m.id) || m.status === status || (m.status === 'delivered' && status === 'sent')) return m;
+        changed = true;
+        const updated = { ...m, status };
+        if (me) storage.saveMessage(`${me.id}-${chatKey}`, updated);
+        return updated;
+      });
+      return changed ? { ...prev, [chatKey]: next } : prev;
+    });
+  }, []);
+
+  // Encrypt and send one stored message
+  const deliver = useCallback(async (chatKey, msg) => {
+    const me = userRef.current;
+    const body = { t: 'msg', id: msg.id, text: msg.text, type: msg.type, name: me.name, avatar: me.avatar };
+    try {
+      if (chatKey.startsWith('g:')) {
+        await realtime.sendGroup(chatKey.slice(2), body);
+      } else {
+        await realtime.sendDirect(chatKey, body);
+      }
+      setMessageStatus(chatKey, [msg.id], 'sent');
+    } catch (e) {
+      setMessageStatus(chatKey, [msg.id], e.message === 'NO_KEY' ? 'failed' : 'pending');
+    }
+  }, [setMessageStatus]);
+
+  const sendMessage = useCallback((chatKey, text, type = 'text') => {
+    const me = userRef.current;
+    if (!me || !chatKey || !text?.trim()) return;
+    const ts = Date.now();
+    const msg = { id: newMessageId(), chatKey, senderId: me.id, senderName: me.name, text: text.trim(), type, time: clockTime(ts), timestamp: ts, isMe: true, status: 'pending' };
+    storeMessage(chatKey, msg);
+    deliver(chatKey, msg);
+  }, [storeMessage, deliver]);
+
+  // Retry anything that couldn't be sent (e.g. we were offline)
+  const retryPending = useCallback(() => {
+    for (const [chatKey, list] of Object.entries(messagesByChatRef.current)) {
+      list.filter(m => m.isMe && m.status === 'pending').forEach(m => deliver(chatKey, m));
+    }
+  }, [deliver]);
+
+  /* ── Groups ───────────────────────────────────────────────── */
+  const saveGroup = useCallback((group) => {
+    storage.saveMember({ ...group, kind: 'group' });
+    setGroups(prev => ({ ...prev, [group.id]: group }));
+    realtime.watchGroup(group);
+  }, []);
+
+  const createGroup = useCallback(async (name, memberIds) => {
+    const me = userRef.current;
+    const members = [
+      { id: me.id, name: me.name },
+      ...memberIds.map(id => ({ id, name: displayName(peopleRef.current[id]) })),
+    ];
+    const group = {
+      id: 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      name: name.trim(),
+      avatar: '👥',
+      key: newGroupKey(),
+      members,
+      createdBy: me.id,
+      createdAt: Date.now(),
+    };
+    saveGroup(group);
+    await Promise.all(memberIds.map(id => realtime.sendDirect(id, { t: 'group_invite', group }).catch(() => {})));
+    addSystemNote(groupChatKey(group.id), `You created “${group.name}”`);
+    return group;
+  }, [saveGroup, addSystemNote]);
+
+  const addGroupMembers = useCallback(async (groupId, memberIds) => {
+    const group = groupsRef.current[groupId];
+    if (!group) return;
+    const added = memberIds
+      .filter(id => !group.members.some(m => m.id === id))
+      .map(id => ({ id, name: displayName(peopleRef.current[id]) }));
+    if (!added.length) return;
+    const updated = { ...group, members: [...group.members, ...added] };
+    saveGroup(updated);
+    await Promise.all(added.map(m => realtime.sendDirect(m.id, { t: 'group_invite', group: updated }).catch(() => {})));
+    realtime.sendGroup(groupId, { t: 'group_update', members: updated.members, name: updated.name }).catch(() => {});
+    addSystemNote(groupChatKey(groupId), `You added ${added.map(m => m.name).join(', ')}`);
+  }, [saveGroup, addSystemNote]);
+
+  const leaveGroup = useCallback((groupId) => {
+    const me = userRef.current;
+    const group = groupsRef.current[groupId];
+    if (!group) return;
+    const remaining = group.members.filter(m => m.id !== me.id);
+    realtime.sendGroup(groupId, { t: 'group_update', members: remaining, name: group.name, left: me.name }).catch(() => {});
+    realtime.unwatchGroup(groupId);
+    storage.deleteMember(groupId);
+    setGroups(prev => { const next = { ...prev }; delete next[groupId]; return next; });
+    setActiveChatIdState(null);
+  }, []);
+
+  /* ── Load saved data when the account changes ─────────────── */
+  useEffect(() => {
+    setPeople({});
+    setGroups({});
+    setPhoneContacts([]);
+    setMessagesByChat({});
+    setUnreadByChat({});
+    setActiveChatIdState(null);
+    seenIdsRef.current = {};
+    if (!user) return;
+
+    let cancelled = false;
+    (async () => {
+      const saved = await storage.getMembers();
+      const grouped = await storage.getMessagesByPrefix(`${user.id}-`);
+      if (cancelled) return;
+
+      const savedPeople = {};
+      const savedGroups = {};
+      for (const r of saved) {
+        if (r.kind === 'group') savedGroups[r.id] = r;
+        else if (r.id !== user.id) savedPeople[r.id] = r;
+      }
+      setPeople(prev => ({ ...savedPeople, ...prev }));
+      setGroups(prev => ({ ...savedGroups, ...prev }));
+
+      const loaded = {};
+      const prefix = `${user.id}-`;
+      for (const [scope, msgs] of Object.entries(grouped)) {
+        const chatKey = scope.slice(prefix.length);
+        const seen = (seenIdsRef.current[chatKey] ||= new Set());
+        loaded[chatKey] = msgs.map(({ scope: _s, ...m }) => m).filter(m => !seen.has(m.id));
+        loaded[chatKey].forEach(m => seen.add(m.id));
+      }
+      setMessagesByChat(prev => {
+        const merged = { ...prev };
+        for (const [k, msgs] of Object.entries(loaded)) {
+          merged[k] = [...msgs, ...(prev[k] || [])].sort((a, b) => a.timestamp - b.timestamp);
+        }
+        return merged;
+      });
+
+      // Known public keys let us send (and queue) messages even before we reconnect
+      Object.values(savedPeople).forEach(p => { if (p.profile) realtime.profiles.set(p.id, p.profile); });
+      Object.values(savedGroups).forEach(g => realtime.watchGroup(g));
+      realtime.watchUsers(Object.keys(savedPeople));
+      syncPhoneContacts();
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Realtime connection ──────────────────────────────────── */
+  useEffect(() => {
+    if (!user) return;
+    realtime.init(userRef.current);
+
+    const unsubs = [
+      realtime.on('connection_status', ({ connected }) => {
+        setRealtimeConnected(connected);
+        if (connected) setTimeout(retryPending, 1500);
+      }),
+      realtime.on('peer_ready', ({ peerId }) => setPeerId(peerId)),
+      realtime.on('profile', applyProfile),
+      realtime.on('profile_removed', ({ id }) => {
+        if (peopleRef.current[id]) upsertPerson(id, { registered: false });
+      }),
+
+      realtime.on('direct', ({ from, pub, body }) => {
+        const known = peopleRef.current[from];
+        // Someone new messaged us: remember them and follow their profile
+        if (!known) {
+          upsertPerson(from, { source: 'chat', profile: { id: from, name: body.name || 'Kinnect user', avatar: body.avatar || '🙂', pub } });
+          realtime.watchUsers([from]);
+        } else if (known.profile?.pub && publicKeyFingerprint(known.profile.pub) !== publicKeyFingerprint(pub) && messagesByChatRef.current[from]?.length) {
+          addSystemNote(from, `🔐 ${displayName(known)}'s security key changed. They may have reinstalled Kinnect.`);
+          upsertPerson(from, p => ({ profile: { ...p.profile, pub } }));
+        }
+
+        if (body.t === 'msg') {
+          const ts = body.ts || Date.now();
+          const stored = storeMessage(from, {
+            id: body.id, chatKey: from, senderId: from, senderName: body.name || displayName(known),
+            text: body.text || '', type: body.type || 'text', time: clockTime(ts), timestamp: ts, isMe: false, status: 'received',
+          });
+          if (stored || body.id) realtime.sendDirect(from, { t: 'rcpt', ids: [body.id] }, { waitMs: 3000 }).catch(() => {});
+        } else if (body.t === 'rcpt') {
+          setMessageStatus(from, body.ids || [], 'delivered');
+        } else if (body.t === 'group_invite' && body.group?.id && body.group.key) {
+          const isNew = !groupsRef.current[body.group.id];
+          saveGroup(body.group);
+          // Stamp the note with the invite's time so it sorts before the group's first message
+          if (isNew) addSystemNote(groupChatKey(body.group.id), `${body.group.members.find(m => m.id === from)?.name || 'Someone'} added you to “${body.group.name}”`, (body.ts || Date.now()) - 1);
+        }
+      }),
+
+      realtime.on('group', ({ groupId, from, body }) => {
+        const chatKey = groupChatKey(groupId);
+        if (body.t === 'msg') {
+          const ts = body.ts || Date.now();
+          storeMessage(chatKey, {
+            id: body.id, chatKey, senderId: from, senderName: body.name || displayName(peopleRef.current[from]),
+            text: body.text || '', type: body.type || 'text', time: clockTime(ts), timestamp: ts, isMe: false, status: 'received',
+          });
+        } else if (body.t === 'group_update' && groupsRef.current[groupId]) {
+          saveGroup({ ...groupsRef.current[groupId], members: body.members, name: body.name });
+          if (body.left) addSystemNote(chatKey, `${body.left} left the group`);
+        }
+      }),
+
+      realtime.on('incoming_call', (callData) => {
+        const known = peopleRef.current[callData.caller.id];
+        setIncomingCall({ ...callData, caller: { ...callData.caller, name: known ? displayName(known) : callData.caller.name, photo: known?.profile?.photo } });
+      }),
+      realtime.on('call_ended', () => {
+        setActiveCall(null);
+        setIncomingCall(null);
+        setRemoteStream(null);
+      }),
+    ];
+
+    flushFeedback(); // send any feedback that was waiting
+    return () => unsubs.forEach(unsub => unsub());
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh the phone book when coming back to the app (new contacts saved meanwhile)
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') syncPhoneContacts(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [syncPhoneContacts]);
+
+  /* ── Chat list ────────────────────────────────────────────── */
+  const chatList = useMemo(() => {
+    const rows = [];
+    for (const [key, msgs] of Object.entries(messagesByChat)) {
+      if (!msgs.length) continue;
+      const last = msgs[msgs.length - 1];
+      if (key.startsWith('g:')) {
+        const g = groups[key.slice(2)];
+        if (!g) continue;
+        rows.push({ key, kind: 'group', view: { id: g.id, name: g.name, emoji: g.avatar || '👥', avatarBg: '#FEF3C7', avatarColor: '#92400E' }, group: g, last, unread: unreadByChat[key] || 0 });
+      } else {
+        const p = people[key] || { id: key };
+        rows.push({ key, kind: 'person', view: personView(p), person: p, last, unread: unreadByChat[key] || 0 });
+      }
+    }
+    // Groups you were just added to show up even before the first message
+    for (const g of Object.values(groups)) {
+      const key = groupChatKey(g.id);
+      if (!rows.some(r => r.key === key)) {
+        rows.push({ key, kind: 'group', view: { id: g.id, name: g.name, emoji: g.avatar || '👥', avatarBg: '#FEF3C7', avatarColor: '#92400E' }, group: g, last: null, unread: 0 });
+      }
+    }
+    return rows.sort((a, b) => (b.last?.timestamp || b.group?.createdAt || 0) - (a.last?.timestamp || a.group?.createdAt || 0));
+  }, [messagesByChat, unreadByChat, people, groups]);
+
+  // Registered people you know (phone contacts or added by number), by name
+  const kinnectContacts = useMemo(() => (
+    Object.values(people)
+      .filter(p => p.registered && (p.source === 'contacts' || p.source === 'manual' || p.contactName))
+      .map(personView)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  ), [people]);
+
+  // Open (or close with null) a conversation; opening marks it read
+  const setActiveChatId = useCallback((chatKey) => {
+    setActiveChatIdState(chatKey);
+    if (chatKey) setUnreadByChat(prev => (prev[chatKey] ? { ...prev, [chatKey]: 0 } : prev));
+  }, []);
+
+  const openChat = useCallback((chatKey) => {
+    setActiveTab('chats');
+    setActiveChatId(chatKey);
+  }, [setActiveChatId]);
+
+  /* ── Calls ────────────────────────────────────────────────── */
   const startCall = useCallback((contact, type) => {
-    const callData = { contact, type, startTime: Date.now() };
-    setActiveCall(callData);
-
-    // Broadcast incoming call alert to target device
+    setActiveCall({ contact, type, startTime: Date.now() });
     realtime.initiateCall({ targetContact: contact, callType: type });
   }, []);
 
-  // Answer Incoming Call
   const answerIncomingCall = useCallback(() => {
     if (!incomingCall) return;
-
-    const callerContact = {
-      id: incomingCall.caller?.id || 'caller',
-      name: incomingCall.caller?.name || 'Family Member',
-      emoji: incomingCall.caller?.avatar || '👵',
-      city: 'Live Connection',
-      country: 'Online',
-      peerId: incomingCall.caller?.peerId
-    };
-
+    const known = peopleRef.current[incomingCall.caller?.id];
+    const view = known ? personView(known) : {};
     setActiveCall({
-      contact: callerContact,
+      contact: {
+        ...view,
+        id: incomingCall.caller?.id,
+        name: incomingCall.caller?.name || view.name || 'Kinnect user',
+        emoji: incomingCall.caller?.avatar || view.emoji || '🙂',
+        peerId: incomingCall.caller?.peerId,
+      },
       type: incomingCall.callType || 'video',
       startTime: Date.now(),
       isIncoming: true,
-      callData: incomingCall
+      callData: incomingCall,
     });
-
     realtime.respondToCall({ callData: incomingCall, accepted: true });
     setIncomingCall(null);
   }, [incomingCall]);
 
-  // Decline Incoming Call
   const declineIncomingCall = useCallback(() => {
     if (!incomingCall) return;
     realtime.respondToCall({ callData: incomingCall, accepted: false });
@@ -698,95 +598,27 @@ export function AppProvider({ children }) {
   }, [incomingCall]);
 
   const endCall = useCallback(() => {
-    if (activeCall) {
-      realtime.endCall({ callData: activeCall.callData || activeCall });
-    }
+    if (activeCall) realtime.endCall({ callData: activeCall.callData || activeCall });
     setActiveCall(null);
     setRemoteStream(null);
   }, [activeCall]);
 
-  // Join or leave a learning circle
-  const toggleCircle = useCallback((circleId) => {
-    setJoinedCircleIds(prev =>
-      prev.includes(circleId) ? prev.filter(id => id !== circleId) : [...prev, circleId]
-    );
-  }, []);
-
-  // Community Interactions
-  const likeCommunityPost = useCallback((postId) => {
-    setCommunityPosts(prev => prev.map(p => {
-      if (p.id !== postId) return p;
-      const nextLiked = !p.hasLiked;
-      return {
-        ...p,
-        hasLiked: nextLiked,
-        likes: nextLiked ? p.likes + 1 : p.likes - 1
-      };
-    }));
-  }, []);
-
-  const addCommunityComment = useCallback((postId, commentText) => {
-    if (!commentText.trim()) return;
-    const newComment = {
-      id: 'cm-' + Date.now(),
-      author: user ? user.name : 'You',
-      text: commentText.trim(),
-      time: 'Just now'
-    };
-    setCommunityPosts(prev => prev.map(p => {
-      if (p.id !== postId) return p;
-      return {
-        ...p,
-        comments: [...p.comments, newComment]
-      };
-    }));
-  }, [user]);
-
-  const createCommunityPost = useCallback(({ title, content, tag, category }) => {
-    const newPost = {
-      id: 'p-' + Date.now(),
-      author: user ? user.name : 'You',
-      authorRelation: 'Me · Matriarch',
-      avatar: user?.avatar || '👵',
-      avatarBg: '#FEF3C7',
-      avatarColor: '#B45309',
-      time: 'Just now',
-      tag: tag || 'Family Blessing 🙏',
-      category: category || 'family',
-      title: title || 'Warm Greetings to My Family',
-      content: content.trim(),
-      likes: 1,
-      hasLiked: true,
-      comments: []
-    };
-    setCommunityPosts(prev => [newPost, ...prev]);
-  }, [user]);
-
-  const markSnippetWatched = useCallback((id) => {
-    setSnippets(prev => prev.map(s => s.id === id ? { ...s, watched: true } : s));
-  }, []);
-
-  // Total unread chat count
-  const totalUnreadChats = Object.values(chats).reduce((sum, c) => sum + (c.unread || 0), 0);
+  const totalUnreadChats = Object.values(unreadByChat).reduce((sum, n) => sum + (n || 0), 0);
 
   return (
     <AppContext.Provider value={{
-      user, setUser, logout,
-      familyCode, setFamilyCode,
+      user, createAccount, updateProfile, deleteAccount,
+      locked, lockApp, unlockApp, enableLock, disableLock,
       realtimeConnected, peerId,
       activeTab, setActiveTab,
-      contacts,
+      people, phoneContacts, kinnectContacts, contactsStatus, syncPhoneContacts, addByNumber,
+      groups, createGroup, addGroupMembers, leaveGroup,
+      messagesByChat, chatList, activeChatId, setActiveChatId, openChat, sendMessage, totalUnreadChats,
       topics,
-      chats, activeChatId, setActiveChatId, openChat, sendMessage, totalUnreadChats,
-      communityPosts, likeCommunityPost, addCommunityComment, createCommunityPost,
-      joinedCircleIds, toggleCircle,
-      snippets, markSnippetWatched,
       activeCall, incomingCall, startCall, answerIncomingCall, declineIncomingCall, endCall,
       remoteStream, setRemoteStream,
       fontScale, setFontScale,
       selectedLanguage, setSelectedLanguage,
-      feedbackList, submitFeedback,
-      storageMode, setStorageMode,
     }}>
       {children}
     </AppContext.Provider>

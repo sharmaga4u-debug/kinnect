@@ -7,6 +7,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { realtime } from '../services/realtime';
 import GamesHub from './GamesHub';
+import Avatar from './Avatar';
 
 /* ── Simple Storybook ── */
 const STORY_PAGES = [
@@ -126,7 +127,7 @@ function DoodleCanvas() {
 
 /* ── Main Call Overlay with Real WebRTC Camera & Microphone ── */
 export default function ActiveVideoCall() {
-  const { activeCall, endCall, user, familyCode } = useApp();
+  const { activeCall, endCall, user } = useApp();
   const [muted, setMuted] = useState(false);
   const [videoOff, setVideoOff] = useState(false);
   const [activity, setActivity] = useState(null); // null | 'game' | 'story' | 'draw'
@@ -316,11 +317,11 @@ export default function ActiveVideoCall() {
             </p>
             {webrtcConnected ? (
               <span className="badge badge-green" style={{ fontSize: '0.65rem', padding: '1px 6px', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22C55E', display: 'inline-block' }} /> Live P2P
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22C55E', display: 'inline-block' }} /> Connected
               </span>
             ) : (
               <span className="badge badge-amber" style={{ fontSize: '0.65rem', padding: '1px 6px' }}>
-                Connecting...
+                Ringing…
               </span>
             )}
           </div>
@@ -346,7 +347,7 @@ export default function ActiveVideoCall() {
           fontSize: '0.78rem', color: '#991B1B', fontWeight: 600
         }}>
           <AlertCircle size={16} color="#DC2626" style={{ flexShrink: 0 }} />
-          <span>Camera & Microphone access was blocked. Tap the lock/tune icon in your address bar to allow.</span>
+          <span>Camera or microphone access was blocked. Allow it for Kinnect in your phone's settings, then call again.</span>
         </div>
       )}
 
@@ -361,7 +362,10 @@ export default function ActiveVideoCall() {
               boxShadow: '0 12px 36px rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)'
             }}>
               {/* REAL REMOTE STREAM (When connected to another phone/computer) */}
-              {remoteStream ? (
+              {remoteStream && type !== 'video' && (
+                <video ref={remoteVideoRef} autoPlay playsInline style={{ display: 'none' }} />
+              )}
+              {remoteStream && type === 'video' ? (
                 <video
                   ref={remoteVideoRef}
                   autoPlay
@@ -375,13 +379,13 @@ export default function ActiveVideoCall() {
               ) : (
                 /* Contact Avatar & City while connecting or audio-only */
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '5.5rem', marginBottom: 6 }}>{contact.emoji}</div>
+                  <Avatar person={contact} size={120} style={{ margin: '0 auto 12px', border: '3px solid rgba(255,255,255,0.3)' }} />
                   <p style={{ color: '#FFFFFF', fontWeight: 800, fontSize: '1.2rem' }}>{contact.name}</p>
                   <p style={{ color: 'rgba(255,255,255,.6)', fontSize: '0.86rem' }}>
-                    {webrtcConnected ? 'Connected via Live Audio' : `Connecting to ${contact.name}...`}
+                    {webrtcConnected ? 'Connected' : `Ringing ${contact.name.split(' ')[0]}…`}
                   </p>
-                  <p style={{ color: 'rgba(255,255,255,.4)', fontSize: '0.72rem', marginTop: 4 }}>
-                    Family Room: {familyCode}
+                  <p style={{ color: 'rgba(255,255,255,.4)', fontSize: '0.74rem', marginTop: 6 }}>
+                    🔒 End-to-end encrypted
                   </p>
                 </div>
               )}
@@ -432,7 +436,7 @@ export default function ActiveVideoCall() {
 
             {/* Activities During Call: Games, Story, Drawing */}
             <p style={{ color: 'rgba(255,255,255,.6)', fontSize: '0.78rem', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>
-              Bonding Activities During Call
+              While you talk
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {[
@@ -460,7 +464,7 @@ export default function ActiveVideoCall() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <p style={{ color: '#fff', fontWeight: 800, fontSize: '0.98rem' }}>
-                {activity === 'game' ? '🎮 Family Games Hub' : activity === 'story' ? '📖 Storybook' : '🎨 Draw Together'}
+                {activity === 'game' ? '🎮 Games' : activity === 'story' ? '📖 Storybook' : '🎨 Draw Together'}
               </p>
               <button 
                 onClick={() => setActivity(null)} 

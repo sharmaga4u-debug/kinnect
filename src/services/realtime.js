@@ -1,17 +1,37 @@
 import mqtt from 'mqtt';
 import Peer from 'peerjs';
+import {
+  loadOrCreateIdentity, sharedKeyFor, groupKeyFor, encryptJson, decryptJson,
+} from './crypto';
+
+/**
+ * Realtime transport over a public MQTT broker. Everything personal is end-to-end encrypted
+ * (see crypto.js) before it is published:
+ *   kinnect/v2/dir/<userId>   retained public profile: name, avatar, photo, timezone, public key
+ *   kinnect/v2/in/<userId>    encrypted direct messages, receipts, group invites, call signalling,
+ *                             and group messages (encrypted with the group key, one copy per member)
+ * Group messages go to each member's own inbox rather than a shared topic, so the broker holds them
+ * for members who are offline or who haven't processed their group invite yet.
+ */
+const PREFIX = 'kinnect/v2';
+const BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
+const RING_TIMEOUT_MS = 45000;
 
 class RealtimeService {
   constructor() {
     this.mqttClient = null;
     this.peer = null;
     this.peerId = null;
-    this.familyCode = 'sharma-family';
     this.currentUser = null;
     this.listeners = new Map();
     this.activeCallSession = null;
     this.isConnected = false;
     this.ringInterval = null;
+    this.profiles = new Map();   // userId → directory record
+    this.watched = new Set();    // userIds whose directory record we follow
+    this.groups = new Map();     // groupId → group (with key)
+    this.callPartnerId = null;
+    this.inbox = Promise.resolve(); // processes incoming messages strictly in order
   }
 
   // Event subscription
@@ -37,69 +57,81 @@ class RealtimeService {
     }
   }
 
-  // Initialize with user profile and family code
-  init(user, familyCode = 'sharma-family') {
+  // Initialize with the signed-in user
+  async init(user) {
     if (!user) return;
     this.currentUser = user;
-    this.familyCode = (familyCode || 'sharma-family').toLowerCase().replace(/[^a-z0-9-_]/g, '');
-
-    const sanitizedUserId = (user.id || user.name || 'user')
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '');
-    const cleanPeerId = `kinnect-${this.familyCode}-${sanitizedUserId}`;
-
+    this.identity = await loadOrCreateIdentity();
     this.connectMQTT();
-    this.initPeer(cleanPeerId);
+    this.initPeer(`kinnect2-${user.id}`);
   }
 
-  // Connect to MQTT Broker over WebSockets
+  // Tear down connections (on account removal)
+  disconnect() {
+    this.stopRingtone();
+    if (this.mqttClient) {
+      try { this.mqttClient.end(true); } catch (_) {}
+      this.mqttClient = null;
+    }
+    if (this.peer) {
+      try { this.peer.destroy(); } catch (_) {}
+      this.peer = null;
+    }
+    this.isConnected = false;
+    this.currentUser = null;
+    this.watched.clear();
+    this.groups.clear();
+    this.profiles.clear();
+    this.emit('connection_status', { connected: false });
+  }
+
+  // Stable per-install id so the broker keeps our session (and queues messages) while the app is closed
+  getDeviceId() {
+    try {
+      let id = localStorage.getItem('kinnect_device_id');
+      if (!id) {
+        id = Math.random().toString(36).slice(2, 10);
+        localStorage.setItem('kinnect_device_id', id);
+      }
+      return id;
+    } catch {
+      return Math.random().toString(36).slice(2, 10);
+    }
+  }
+
   connectMQTT() {
     if (this.mqttClient) {
       try { this.mqttClient.end(true); } catch (_) {}
     }
-
-    const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
-    const clientId = `kinnect_client_${Math.random().toString(16).slice(2, 10)}`;
+    const me = this.currentUser;
+    const clientId = `kn2_${me.id.slice(0, 16)}_${this.getDeviceId()}`;
 
     try {
-      this.mqttClient = mqtt.connect(brokerUrl, {
+      this.mqttClient = mqtt.connect(BROKER_URL, {
         clientId,
-        clean: true,
+        protocolVersion: 5,
+        clean: false, // persistent session: QoS 1 messages are queued while we're offline
+        properties: { sessionExpiryInterval: 7 * 24 * 60 * 60 },
         connectTimeout: 5000,
         reconnectPeriod: 3000,
       });
 
       this.mqttClient.on('connect', () => {
-        console.log('[Realtime] Connected to live messaging broker');
         this.isConnected = true;
         this.emit('connection_status', { connected: true });
-
-        // Subscribe to family room topics
-        const topics = [
-          `kinnect/${this.familyCode}/chat`,
-          `kinnect/${this.familyCode}/direct/${this.currentUser?.id || 'me'}`,
-          `kinnect/${this.familyCode}/calls/${this.currentUser?.id || 'me'}`,
-          `kinnect/${this.familyCode}/calls/broadcast`,
-          `kinnect/${this.familyCode}/draw`,
-          `kinnect/${this.familyCode}/presence`,
-        ];
-
-        this.mqttClient.subscribe(topics, (err) => {
-          if (err) console.error('[Realtime] Subscription error:', err);
-          else {
-            // Announce presence
-            this.broadcastPresence('online');
-          }
-        });
+        this.subscribe([
+          `${PREFIX}/in/${me.id}`,
+          ...[...this.watched].map(id => `${PREFIX}/dir/${id}`),
+        ]);
+        this.publishProfile(this.currentUser);
       });
 
       this.mqttClient.on('message', (topic, payload) => {
-        try {
-          const msg = JSON.parse(payload.toString());
-          this.handleIncomingMQTTMessage(topic, msg);
-        } catch (e) {
-          console.warn('[Realtime] Could not parse message:', e);
-        }
+        const raw = payload.toString();
+        // In order: a group invite must be handled before that group's first message
+        this.inbox = this.inbox
+          .then(() => this.handleMessage(topic, raw))
+          .catch(e => console.warn('[Realtime] message error', e));
       });
 
       this.mqttClient.on('error', (err) => {
@@ -114,6 +146,16 @@ class RealtimeService {
       });
     } catch (err) {
       console.warn('[Realtime] Failed to initialize MQTT client:', err);
+    }
+  }
+
+  subscribe(topics) {
+    if (!this.mqttClient || !this.isConnected || !topics.length) return;
+    // Subscribe in batches; people can have hundreds of contacts
+    for (let i = 0; i < topics.length; i += 50) {
+      this.mqttClient.subscribe(topics.slice(i, i + 50), { qos: 1 }, (err) => {
+        if (err) console.warn('[Realtime] Subscription error:', err);
+      });
     }
   }
 
@@ -136,23 +178,20 @@ class RealtimeService {
       });
 
       this.peer.on('open', (id) => {
-        console.log('[Realtime] PeerJS online with ID:', id);
         this.peerId = id;
         this.emit('peer_ready', { peerId: id });
       });
 
       // Handle incoming WebRTC video/audio call
       this.peer.on('call', (mediaConnection) => {
-        console.log('[Realtime] Incoming P2P WebRTC media call from:', mediaConnection.peer);
         this.activeCallSession = mediaConnection;
         this.emit('webrtc_call_received', { mediaConnection });
       });
 
       this.peer.on('error', (err) => {
-        // If peer ID already taken, fallback to random ID
+        // If peer ID already taken (e.g. a second tab), fall back to a random suffix
         if (err.type === 'unavailable-id') {
-          const fallbackId = `${preferredId}-${Math.floor(Math.random() * 1000)}`;
-          this.initPeer(fallbackId);
+          this.initPeer(`${preferredId}-${Math.floor(Math.random() * 1000)}`);
         } else {
           console.warn('[Realtime] PeerJS warning:', err);
         }
@@ -162,157 +201,222 @@ class RealtimeService {
     }
   }
 
-  // Handle incoming message based on topic
-  handleIncomingMQTTMessage(topic, data) {
-    // Ignore self messages
-    if (data.senderId === this.currentUser?.id && data.clientId === this.mqttClient?.options?.clientId) {
+  /* ── Directory (public profiles) ─────────────────────────────── */
+
+  publishProfile(user) {
+    if (!this.mqttClient || !this.isConnected || !user || !this.identity) return;
+    const record = {
+      id: user.id,
+      name: user.name,
+      avatar: user.avatar || '🙂',
+      photo: user.photo || '',
+      about: user.about || '',
+      tz: user.timezone || '',
+      pub: this.identity.publicJwk,
+      ts: Date.now(),
+    };
+    this.mqttClient.publish(`${PREFIX}/dir/${user.id}`, JSON.stringify(record), { qos: 1, retain: true });
+  }
+
+  // Remove our public profile (account deleted)
+  clearProfile(userId) {
+    if (!this.mqttClient || !this.isConnected) return;
+    this.mqttClient.publish(`${PREFIX}/dir/${userId}`, '', { qos: 1, retain: true });
+  }
+
+  // Follow people's public profiles; registered users arrive as retained 'profile' events
+  watchUsers(ids) {
+    const fresh = ids.filter(id => id && id !== this.currentUser?.id && !this.watched.has(id));
+    fresh.forEach(id => this.watched.add(id));
+    this.subscribe(fresh.map(id => `${PREFIX}/dir/${id}`));
+  }
+
+  getProfile(id) {
+    return this.profiles.get(id) || null;
+  }
+
+  // Resolve once someone's public key is known (or null after a timeout)
+  waitForProfile(id, timeoutMs = 8000) {
+    const known = this.profiles.get(id);
+    if (known?.pub) return Promise.resolve(known);
+    this.watchUsers([id]);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { off(); resolve(null); }, timeoutMs);
+      const off = this.on('profile', (p) => {
+        if (p.id === id && p.pub) { clearTimeout(timer); off(); resolve(p); }
+      });
+    });
+  }
+
+  /* ── Groups ──────────────────────────────────────────────────── */
+
+  watchGroup(group) {
+    if (!group?.id || !group.key) return;
+    this.groups.set(group.id, group);
+  }
+
+  unwatchGroup(groupId) {
+    this.groups.delete(groupId);
+  }
+
+  /* ── Sending ─────────────────────────────────────────────────── */
+
+  // Encrypt `body` for one person. Throws 'NO_KEY' if they aren't on Kinnect (yet).
+  async sendDirect(toId, body, { qos = 1, waitMs = 8000 } = {}) {
+    if (!this.mqttClient || !this.currentUser) throw new Error('OFFLINE');
+    const profile = await this.waitForProfile(toId, waitMs);
+    if (!profile?.pub) throw new Error('NO_KEY');
+    const me = this.currentUser.id;
+    const key = await sharedKeyFor(me, toId, profile.pub);
+    const sealed = await encryptJson(key, { ...body, ts: body.ts || Date.now() });
+    const envelope = { v: 2, f: me, k: this.identity.publicJwk, ...sealed };
+    // mqtt.js queues QoS 1 publishes while disconnected and sends them on reconnect
+    this.mqttClient.publish(`${PREFIX}/in/${toId}`, JSON.stringify(envelope), { qos });
+  }
+
+  // Encrypt once with the group key, then drop a copy in every other member's inbox
+  async sendGroup(groupId, body, members) {
+    const group = this.groups.get(groupId);
+    if (!this.mqttClient || !group) throw new Error('NO_GROUP');
+    const me = this.currentUser.id;
+    const sealed = await encryptJson(await groupKeyFor(group.key), { ...body, ts: body.ts || Date.now() });
+    const payload = JSON.stringify({ v: 2, g: groupId, f: me, ...sealed });
+    for (const m of members || group.members) {
+      if (m.id !== me) this.mqttClient.publish(`${PREFIX}/in/${m.id}`, payload, { qos: 1 });
+    }
+  }
+
+  /* ── Receiving ───────────────────────────────────────────────── */
+
+  async handleMessage(topic, raw) {
+    const me = this.currentUser?.id;
+    if (!me) return;
+
+    if (topic.startsWith(`${PREFIX}/dir/`)) {
+      const id = topic.slice(`${PREFIX}/dir/`.length);
+      if (!raw) {
+        this.profiles.delete(id);
+        this.emit('profile_removed', { id });
+        return;
+      }
+      const record = JSON.parse(raw);
+      if (record.id !== id) return;
+      this.profiles.set(id, record);
+      this.emit('profile', record);
       return;
     }
 
-    if (topic.endsWith('/chat') || topic.includes('/direct/')) {
-      this.playMessageSound();
-      this.emit('chat_message', data);
-    } else if (topic.includes('/calls/')) {
-      if (data.type === 'CALL_RINGING') {
-        this.playRingtone();
-        this.emit('incoming_call', data);
-      } else if (data.type === 'CALL_ACCEPTED') {
-        this.stopRingtone();
-        this.emit('call_accepted', data);
-      } else if (data.type === 'CALL_DECLINED' || data.type === 'CALL_ENDED') {
-        this.stopRingtone();
-        this.emit('call_ended', data);
+    if (!raw) return;
+    const env = JSON.parse(raw);
+
+    if (topic !== `${PREFIX}/in/${me}` || !env.f) return;
+
+    if (env.g) {
+      const group = this.groups.get(env.g);
+      if (!group || env.f === me) return;
+      let body;
+      try {
+        body = await decryptJson(await groupKeyFor(group.key), env);
+      } catch {
+        return;
       }
-    } else if (topic.endsWith('/draw')) {
-      this.emit('doodle_draw', data);
-    } else if (topic.endsWith('/presence')) {
-      this.emit('presence_update', data);
+      if (body.t === 'msg') this.playMessageSound();
+      this.emit('group', { groupId: env.g, from: env.f, body });
+      return;
     }
+
+    if (!env.k) return;
+    let body;
+    try {
+      body = await decryptJson(await sharedKeyFor(me, env.f, env.k), env);
+    } catch {
+      console.warn('[Realtime] Could not decrypt message from', env.f);
+      return;
+    }
+    this.handleDirect(env.f, env.k, body);
   }
 
-  // Send Chat message across devices
-  sendChatMessage({ chatId, text, type = 'text', media = {} }) {
-    if (!this.mqttClient || !this.isConnected) return false;
-
-    const payload = {
-      id: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-      chatId,
-      senderId: this.currentUser?.id,
-      senderName: this.currentUser?.name || 'Family Member',
-      avatar: this.currentUser?.avatar || '👵',
-      text: text || '',
-      type,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      timestamp: Date.now(),
-      clientId: this.mqttClient.options.clientId,
-      ...media
-    };
-
-    const topic = chatId === 'family-group' 
-      ? `kinnect/${this.familyCode}/chat` 
-      : `kinnect/${this.familyCode}/direct/${chatId}`;
-
-    this.mqttClient.publish(topic, JSON.stringify(payload), { qos: 1 });
-    return payload;
+  handleDirect(from, pub, body) {
+    // Remember the sender's key so we can reply before their directory record arrives
+    if (!this.profiles.get(from)?.pub) this.profiles.set(from, { id: from, pub });
+    switch (body.t) {
+      case 'call_ring':
+        if (Date.now() - (body.ts || 0) > RING_TIMEOUT_MS) return; // missed while offline
+        this.callPartnerId = from;
+        this.playRingtone();
+        this.emit('incoming_call', {
+          callId: body.callId,
+          callType: body.callType,
+          caller: { id: from, name: body.name, avatar: body.avatar, peerId: body.peerId },
+        });
+        return;
+      case 'call_accept':
+        this.stopRingtone();
+        this.emit('call_accepted', { callId: body.callId, responder: { id: from, peerId: body.peerId } });
+        return;
+      case 'call_decline':
+      case 'call_end':
+        this.stopRingtone();
+        this.emit('call_ended', { callId: body.callId, reason: body.t });
+        return;
+      case 'doodle':
+        this.emit('doodle_draw', body);
+        return;
+      case 'group_invite':
+        // Register right away so the group's next message (queued behind this one) can be read
+        if (body.group?.id && body.group.key) this.groups.set(body.group.id, body.group);
+        break;
+      case 'msg':
+        this.playMessageSound();
+        break;
+      default:
+        break;
+    }
+    this.emit('direct', { from, pub, body });
   }
 
-  // Ring a family member on video or audio call
+  /* ── Calls (signalling is encrypted; media is WebRTC/DTLS) ───── */
+
   initiateCall({ targetContact, callType }) {
-    if (!this.mqttClient) return;
-
-    const payload = {
-      type: 'CALL_RINGING',
-      callId: 'call-' + Date.now(),
+    const callId = 'call-' + Date.now();
+    this.callPartnerId = targetContact.id;
+    this.sendDirect(targetContact.id, {
+      t: 'call_ring',
+      callId,
       callType: callType || 'video',
-      caller: {
-        id: this.currentUser?.id,
-        name: this.currentUser?.name,
-        avatar: this.currentUser?.avatar,
-        relation: this.currentUser?.relation || 'Family Member',
-        peerId: this.peerId
-      },
-      targetContactId: targetContact.id,
-      targetContactName: targetContact.name,
-      familyCode: this.familyCode,
-      timestamp: Date.now(),
-      clientId: this.mqttClient.options.clientId
-    };
-
-    // Target specific contact topic and also broadcast topic for redundancy
-    this.mqttClient.publish(`kinnect/${this.familyCode}/calls/${targetContact.id}`, JSON.stringify(payload), { qos: 1 });
-    this.mqttClient.publish(`kinnect/${this.familyCode}/calls/broadcast`, JSON.stringify(payload), { qos: 1 });
-
-    return payload;
+      peerId: this.peerId,
+      name: this.currentUser?.name,
+      avatar: this.currentUser?.avatar,
+    }).catch(e => {
+      console.warn('[Realtime] Could not ring', e);
+      this.emit('call_ended', { callId, reason: 'unreachable' });
+    });
+    return { callId };
   }
 
-  // Respond to incoming call
   respondToCall({ callData, accepted }) {
-    if (!this.mqttClient) return;
     this.stopRingtone();
-
-    const payload = {
-      type: accepted ? 'CALL_ACCEPTED' : 'CALL_DECLINED',
-      callId: callData.callId,
-      callType: callData.callType,
-      responder: {
-        id: this.currentUser?.id,
-        name: this.currentUser?.name,
-        peerId: this.peerId
-      },
-      callerId: callData.caller?.id,
-      timestamp: Date.now(),
-      clientId: this.mqttClient.options.clientId
-    };
-
-    this.mqttClient.publish(`kinnect/${this.familyCode}/calls/${callData.caller?.id}`, JSON.stringify(payload), { qos: 1 });
-    this.mqttClient.publish(`kinnect/${this.familyCode}/calls/broadcast`, JSON.stringify(payload), { qos: 1 });
+    const to = callData.caller?.id;
+    if (!to) return;
+    this.sendDirect(to, { t: accepted ? 'call_accept' : 'call_decline', callId: callData.callId, peerId: this.peerId })
+      .catch(() => {});
   }
 
-  // End an active call
-  endCall({ callData }) {
+  endCall({ callData } = {}) {
     this.stopRingtone();
-    if (!this.mqttClient) return;
-
-    const payload = {
-      type: 'CALL_ENDED',
-      callId: callData?.callId,
-      endedBy: this.currentUser?.id,
-      timestamp: Date.now(),
-      clientId: this.mqttClient.options?.clientId
-    };
-
-    this.mqttClient.publish(`kinnect/${this.familyCode}/calls/broadcast`, JSON.stringify(payload), { qos: 1 });
-
+    const to = this.callPartnerId;
+    if (to) this.sendDirect(to, { t: 'call_end', callId: callData?.callId }, { qos: 0 }).catch(() => {});
+    this.callPartnerId = null;
     if (this.activeCallSession) {
       try { this.activeCallSession.close(); } catch (_) {}
       this.activeCallSession = null;
     }
   }
 
-  // Broadcast shared doodle stroke
+  // Shared doodle stroke during a call
   broadcastDoodle(doodleData) {
-    if (!this.mqttClient || !this.isConnected) return;
-    const payload = {
-      ...doodleData,
-      senderId: this.currentUser?.id,
-      clientId: this.mqttClient.options.clientId
-    };
-    this.mqttClient.publish(`kinnect/${this.familyCode}/draw`, JSON.stringify(payload), { qos: 0 });
-  }
-
-  // Announce user presence
-  broadcastPresence(status = 'online') {
-    if (!this.mqttClient || !this.isConnected) return;
-    const payload = {
-      userId: this.currentUser?.id,
-      userName: this.currentUser?.name,
-      avatar: this.currentUser?.avatar,
-      peerId: this.peerId,
-      status,
-      timestamp: Date.now(),
-      clientId: this.mqttClient.options.clientId
-    };
-    this.mqttClient.publish(`kinnect/${this.familyCode}/presence`, JSON.stringify(payload), { qos: 0 });
+    if (!this.callPartnerId) return;
+    this.sendDirect(this.callPartnerId, { t: 'doodle', ...doodleData }, { qos: 0, waitMs: 0 }).catch(() => {});
   }
 
   // Browser Web Audio synthesized ringtone (Zero external audio file needed!)

@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write # publish the APK as a GitHub Release
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -33,15 +36,42 @@ jobs:
       - name: Sync Android with Capacitor
         run: npx cap sync android
 
-      - name: Build Android Debug APK
+      # The same key must sign every release, or phones refuse to install updates
+      - name: Restore signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is missing"; exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/kinnect-release.p12"
+
+      - name: Build signed release APK
+        env:
+          KINNECT_KEYSTORE_PATH: ${{ runner.temp }}/kinnect-release.p12
+          KINNECT_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KINNECT_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleRelease --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/kinnect.apk"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kinnect-android-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: kinnect.apk
           if-no-files-found: error
+
+      # Stable download link: https://github.com/<owner>/<repo>/releases/latest/download/kinnect.apk
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep -oP 'versionName "\K[^"]+' android/app/build.gradle)
+          TAG="v${VERSION}.${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" kinnect.apk \
+            --title "Kinnect ${VERSION} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Android APK for testing. Install: download kinnect.apk on your phone and open it (allow installing from this source when asked)." \
+            --latest

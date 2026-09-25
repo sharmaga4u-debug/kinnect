@@ -1,6 +1,7 @@
 import React from 'react';
 import { Phone, PhoneOff, Video, User } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import Avatar from './Avatar';
 
 export default function IncomingCallModal() {
   const { incomingCall, answerIncomingCall, declineIncomingCall } = useApp();
@@ -12,13 +13,12 @@ export default function IncomingCallModal() {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999,
-      background: 'rgba(15, 23, 42, 0.88)',
-      backdropFilter: 'blur(12px)',
+      background: 'linear-gradient(160deg, #0F172A 0%, #134E4A 100%)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 16
-    }} className="animate-fadeIn">
+    }}>
       <div 
-        className="card glass-card animate-popIn" 
+        className="card animate-popIn" 
         style={{
           width: '100%', maxWidth: 420,
           background: 'linear-gradient(145deg, #1E293B, #0F172A)',
@@ -36,16 +36,11 @@ export default function IncomingCallModal() {
             background: 'rgba(34, 197, 94, 0.3)',
             animation: 'pulse 1.6s infinite'
           }} />
-          <div style={{
-            width: '100%', height: '100%',
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #10B981, #059669)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '3rem', position: 'relative', zIndex: 2,
-            boxShadow: '0 8px 24px rgba(16, 185, 129, 0.4)'
-          }}>
-            {caller?.avatar || '👵'}
-          </div>
+          <Avatar
+            person={{ id: caller?.id, emoji: caller?.avatar || '🙂', photo: caller?.photo, name: caller?.name }}
+            size={96}
+            style={{ position: 'relative', zIndex: 2, border: '3px solid rgba(255,255,255,0.8)' }}
+          />
         </div>
 
         <p style={{
@@ -66,7 +61,7 @@ export default function IncomingCallModal() {
           marginBottom: 4,
           color: '#FFFFFF'
         }}>
-          {caller?.name || 'Family Member'}
+          {caller?.name || 'Kinnect user'}
         </h2>
 
         <p style={{
@@ -75,7 +70,7 @@ export default function IncomingCallModal() {
           fontWeight: 600,
           marginBottom: 32
         }}>
-          {caller?.relation || 'Family'} · Tap below to connect
+          🔒 End-to-end encrypted
         </p>
 
         {/* Action Buttons */}
@@ -121,7 +116,7 @@ export default function IncomingCallModal() {
             }}
           >
             {callType === 'video' ? <Video size={24} /> : <Phone size={24} />}
-            <span>Answer Call</span>
+            <span>Answer</span>
           </button>
         </div>
       </div>

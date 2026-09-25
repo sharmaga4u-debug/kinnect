@@ -7,8 +7,8 @@ android {
         applicationId "com.kinnect.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName "1.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +16,25 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing comes from environment variables (GitHub Actions secrets), never from the repo.
+    // Every build must use the same key or phones refuse to install updates over the existing app.
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv("KINNECT_KEYSTORE_PATH")
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storeType "pkcs12"
+                storePassword System.getenv("KINNECT_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KINNECT_KEY_ALIAS")
+                keyPassword System.getenv("KINNECT_KEYSTORE_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
+            if (System.getenv("KINNECT_KEYSTORE_PATH")) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

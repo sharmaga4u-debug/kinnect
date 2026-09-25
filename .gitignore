@@ -31,3 +31,6 @@ android/.idea
 android/*.iml
 android/app/*.iml
 android/local.properties
+
+# Locally downloaded APKs
+dist-apk/

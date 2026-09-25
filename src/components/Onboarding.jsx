@@ -27,9 +27,9 @@ function Back({ onClick }) {
 }
 
 export default function Onboarding() {
-  const { createAccount } = useApp();
+  const { createAccount, fontScale, setFontScale } = useApp();
   const fileRef = useRef(null);
-  const [step, setStep] = useState('welcome'); // welcome | phone | profile | contacts
+  const [step, setStep] = useState('welcome'); // welcome | phone | profile | textsize | contacts
   const [cc, setCc] = useState('91');
   const [number, setNumber] = useState('');
   const [name, setName] = useState('');
@@ -195,8 +195,42 @@ export default function Onboarding() {
         <div style={{ flex: 1, minHeight: 20 }} />
         <button
           className="btn btn-primary btn-full btn-lg" disabled={!ready || busy} style={{ opacity: ready ? 1 : 0.5 }}
-          onClick={() => (canReadContacts ? setStep('contacts') : finish())}
+          onClick={() => setStep('textsize')}
         >
+          {busy ? 'Setting up…' : 'Continue'}
+        </button>
+      </div></div>
+    );
+  }
+
+  /* ── Comfortable text size ── */
+  if (step === 'textsize') {
+    const options = [
+      ['normal', 'Standard', 1],
+      ['large', 'Large', 1.14],
+      ['xlarge', 'Extra large', 1.36],
+    ];
+    return (
+      <div style={wrap}><div style={inner}>
+        <Back onClick={() => setStep('profile')} />
+        <h1 style={h1}>Choose your text size</h1>
+        <p style={lead}>Pick what is easiest to read. You can change it any time in Settings.</p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 22 }}>
+          {options.map(([value, label, scale]) => (
+            <button key={value} onClick={() => setFontScale(value)} style={{
+              textAlign: 'left', padding: '16px 18px', borderRadius: 18, cursor: 'pointer',
+              border: `2px solid ${fontScale === value ? 'var(--c-primary)' : 'var(--c-border)'}`,
+              background: fontScale === value ? '#ECFEFF' : 'var(--c-card)',
+            }}>
+              <span style={{ display: 'block', fontSize: `${1.05 * scale}rem`, fontWeight: 800, color: 'var(--c-text)' }}>{label}</span>
+              <span style={{ display: 'block', fontSize: `${0.95 * scale}rem`, color: 'var(--c-muted)', marginTop: 2 }}>Namaste! How are you today?</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, minHeight: 20 }} />
+        <button className="btn btn-primary btn-full btn-lg" disabled={busy} onClick={() => (canReadContacts ? setStep('contacts') : finish())}>
           {busy ? 'Setting up…' : 'Continue'}
         </button>
       </div></div>

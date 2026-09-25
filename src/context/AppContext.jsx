@@ -40,7 +40,7 @@ export function personView(person) {
     emoji: person.profile?.avatar || '🙂',
     photo: person.profile?.photo || '',
     about: person.profile?.about || '',
-    timezone: person.profile?.tz || 'UTC',
+    timezone: person.profile?.tz || '',
     phone: person.phone || '',
     registered: !!person.registered,
     avatarBg, avatarColor,
@@ -54,6 +54,31 @@ function loadJson(key, fallback) {
 
 function newMessageId() {
   return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+export function localHourIn(tz) {
+  if (!tz) return null;
+  try { return Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }).format(new Date())); }
+  catch { return null; }
+}
+
+// "9:40 PM" in someone else's time zone
+export function localTimeIn(tz) {
+  try { return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: tz }); }
+  catch { return ''; }
+}
+
+// True when their clock differs from ours by at least an hour
+export function differentTimeZone(tz) {
+  if (!tz) return false;
+  const mine = localHourIn(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const theirs = localHourIn(tz);
+  return theirs !== null && mine !== theirs;
+}
+
+// "London" from "Europe/London"
+export function tzCity(tz) {
+  return (tz || '').split('/').pop().replace(/_/g, ' ');
 }
 
 function clockTime(ts) {
@@ -86,6 +111,10 @@ export function AppProvider({ children }) {
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [peerId, setPeerId] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
+  const [lateCall, setLateCall] = useState(null);   // call waiting for "they may be asleep" confirmation
+  const [lastCall, setLastCall] = useState(null);   // finished call, for the quick "how was it?" prompt
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const openFeedback = useCallback(() => setFeedbackOpen(true), []);
   const [topics] = useState(TOPICS);
 
   // Refs so realtime listeners always see current values without re-subscribing
@@ -323,6 +352,7 @@ export function AppProvider({ children }) {
   const deliver = useCallback(async (chatKey, msg) => {
     const me = userRef.current;
     const body = { t: 'msg', id: msg.id, text: msg.text, type: msg.type, name: me.name, avatar: me.avatar };
+    if (msg.type === 'audio') Object.assign(body, { audio: msg.audio, duration: msg.duration });
     try {
       if (chatKey.startsWith('g:')) {
         await realtime.sendGroup(chatKey.slice(2), body);
@@ -335,11 +365,14 @@ export function AppProvider({ children }) {
     }
   }, [setMessageStatus]);
 
-  const sendMessage = useCallback((chatKey, text, type = 'text') => {
+  // `extra` carries voice-message data: { audio: dataUrl, duration: seconds }
+  const sendMessage = useCallback((chatKey, text, type = 'text', extra = {}) => {
     const me = userRef.current;
-    if (!me || !chatKey || !text?.trim()) return;
+    if (!me || !chatKey) return;
+    if (type === 'text' && !text?.trim()) return;
+    if (type === 'audio' && !extra.audio) return;
     const ts = Date.now();
-    const msg = { id: newMessageId(), chatKey, senderId: me.id, senderName: me.name, text: text.trim(), type, time: clockTime(ts), timestamp: ts, isMe: true, status: 'pending' };
+    const msg = { id: newMessageId(), chatKey, senderId: me.id, senderName: me.name, text: (text || '').trim(), type, time: clockTime(ts), timestamp: ts, isMe: true, status: 'pending', ...extra };
     storeMessage(chatKey, msg);
     deliver(chatKey, msg);
   }, [storeMessage, deliver]);
@@ -488,6 +521,7 @@ export function AppProvider({ children }) {
           const stored = storeMessage(from, {
             id: body.id, chatKey: from, senderId: from, senderName: body.name || displayName(known),
             text: body.text || '', type: body.type || 'text', time: clockTime(ts), timestamp: ts, isMe: false, status: 'received',
+            ...(body.type === 'audio' ? { audio: body.audio, duration: body.duration } : {}),
           });
           if (stored || body.id) realtime.sendDirect(from, { t: 'rcpt', ids: [body.id] }, { waitMs: 3000 }).catch(() => {});
         } else if (body.t === 'rcpt') {
@@ -507,6 +541,7 @@ export function AppProvider({ children }) {
           storeMessage(chatKey, {
             id: body.id, chatKey, senderId: from, senderName: body.name || displayName(peopleRef.current[from]),
             text: body.text || '', type: body.type || 'text', time: clockTime(ts), timestamp: ts, isMe: false, status: 'received',
+            ...(body.type === 'audio' ? { audio: body.audio, duration: body.duration } : {}),
           });
         } else if (body.t === 'group_update' && groupsRef.current[groupId]) {
           saveGroup({ ...groupsRef.current[groupId], members: body.members, name: body.name });
@@ -519,6 +554,7 @@ export function AppProvider({ children }) {
         setIncomingCall({ ...callData, caller: { ...callData.caller, name: known ? displayName(known) : callData.caller.name, photo: known?.profile?.photo } });
       }),
       realtime.on('call_ended', () => {
+        noteCallFinished();
         setActiveCall(null);
         setIncomingCall(null);
         setRemoteStream(null);
@@ -581,9 +617,26 @@ export function AppProvider({ children }) {
   }, [setActiveChatId]);
 
   /* ── Calls ────────────────────────────────────────────────── */
-  const startCall = useCallback((contact, type) => {
-    setActiveCall({ contact, type, startTime: Date.now() });
+  const startCall = useCallback((contact, type, activity = null) => {
+    setLateCall(null);
+    setActiveCall({ contact, type, activity, startTime: Date.now() });
     realtime.initiateCall({ targetContact: contact, callType: type });
+  }, []);
+
+  // Check the time where they are first; late at night, ask before ringing
+  const requestCall = useCallback((contact, type, activity = null) => {
+    const hour = localHourIn(contact.timezone);
+    if (hour !== null && (hour >= 22 || hour < 6)) setLateCall({ contact, type, activity, hour });
+    else startCall(contact, type, activity);
+  }, [startCall]);
+
+  const activeCallRef = useRef(activeCall);
+  useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
+  const noteCallFinished = useCallback(() => {
+    const call = activeCallRef.current;
+    if (!call) return;
+    const seconds = Math.round((Date.now() - call.startTime) / 1000);
+    if (seconds >= 20 && !loadJson(PREFS_KEY, {}).noCallPrompt) setLastCall({ name: call.contact?.name, seconds, type: call.type });
   }, []);
 
   const answerIncomingCall = useCallback(() => {
@@ -614,6 +667,7 @@ export function AppProvider({ children }) {
   }, [incomingCall]);
 
   const endCall = useCallback(() => {
+    noteCallFinished();
     if (activeCall) realtime.endCall({ callData: activeCall.callData || activeCall });
     setActiveCall(null);
     setRemoteStream(null);
@@ -631,7 +685,10 @@ export function AppProvider({ children }) {
       groups, createGroup, addGroupMembers, leaveGroup,
       messagesByChat, chatList, activeChatId, setActiveChatId, openChat, sendMessage, totalUnreadChats,
       topics,
-      activeCall, incomingCall, startCall, answerIncomingCall, declineIncomingCall, endCall,
+      activeCall, incomingCall, startCall, requestCall, answerIncomingCall, declineIncomingCall, endCall,
+      lateCall, setLateCall, lastCall, setLastCall,
+      feedbackOpen, openFeedback, closeFeedback: () => setFeedbackOpen(false),
+      setPrefs: savePrefs,
       remoteStream, setRemoteStream,
       fontScale, setFontScale,
       selectedLanguage, setSelectedLanguage,

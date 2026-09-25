@@ -23,7 +23,7 @@ function timeHint(tz) {
 }
 
 export default function CallsPage() {
-  const { kinnectContacts, startCall, setActiveTab } = useApp();
+  const { kinnectContacts, requestCall, setActiveTab } = useApp();
   const [query, setQuery] = useState('');
   const [, tick] = useState(0);
 
@@ -59,21 +59,23 @@ export default function CallsPage() {
           <p className="section-label">Their local time</p>
           <div className="list-card">
             {list.map(c => {
-              const hint = timeHint(c.timezone);
+              const hint = c.timezone ? timeHint(c.timezone) : null;
               return (
                 <div key={c.id} className="list-row" style={{ cursor: 'default' }}>
                   <Avatar person={c} size={50} />
                   <div className="row-main">
                     <p className="row-title">{c.name}</p>
-                    <p className="row-sub">
-                      <strong style={{ color: 'var(--c-text-soft)' }}>{localTime(c.timezone)}</strong>
-                      <span style={{ color: hint.color }}> · {hint.icon} {hint.text}</span>
-                    </p>
+                    {hint ? (
+                      <p className="row-sub" style={{ fontSize: 'calc(0.95rem * var(--app-font-scale))' }}>
+                        <strong style={{ color: 'var(--c-text-soft)' }}>{localTime(c.timezone)}</strong>
+                        <span style={{ color: hint.color }}> · {hint.icon} {hint.text}</span>
+                      </p>
+                    ) : <p className="row-sub">Local time unknown</p>}
                   </div>
-                  <button className="icon-btn" onClick={() => startCall(c, 'audio')} aria-label={`Call ${c.name}`} style={{ background: '#EFF6FF', color: '#2563EB' }}>
+                  <button className="icon-btn" onClick={() => requestCall(c, 'audio')} aria-label={`Call ${c.name}`} style={{ background: '#EFF6FF', color: '#2563EB' }}>
                     <Phone size={19} />
                   </button>
-                  <button className="icon-btn" onClick={() => startCall(c, 'video')} aria-label={`Video call ${c.name}`} style={{ background: '#F0FDF4', color: '#16A34A' }}>
+                  <button className="icon-btn" onClick={() => requestCall(c, 'video')} aria-label={`Video call ${c.name}`} style={{ background: '#F0FDF4', color: '#16A34A' }}>
                     <Video size={20} />
                   </button>
                 </div>

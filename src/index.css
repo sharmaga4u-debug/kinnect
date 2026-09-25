@@ -40,7 +40,7 @@ body.font-large {
   --app-font-scale: 1.14;
 }
 body.font-xlarge {
-  --app-font-scale: 1.28;
+  --app-font-scale: 1.36;
 }
 
 /* Light theme only for now: many surfaces are hard-coded light, so dark mode would hide text */
@@ -723,3 +723,19 @@ body {
   font-size: calc(0.88rem * var(--app-font-scale)); color: #155E75; line-height: 1.45;
 }
 .field-label { display: block; font-size: calc(0.84rem * var(--app-font-scale)); font-weight: 700; color: var(--c-text-soft); margin-bottom: 6px; }
+
+/* Call reactions float up the screen */
+@keyframes floatUp {
+  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+  15%  { transform: translateY(-40px) scale(1.2); opacity: 1; }
+  100% { transform: translateY(-70vh) scale(1); opacity: 0; }
+}
+.float-reaction { position: absolute; bottom: 10px; font-size: 2.6rem; animation: floatUp 2.5s ease-out forwards; }
+
+/* Voice message recording indicator */
+@keyframes recPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #DC2626; animation: recPulse 1s infinite; flex-shrink: 0; }
+
+/* Larger touch targets for older eyes and hands */
+.icon-btn { width: 46px; height: 46px; min-width: 46px; }
+body.font-large .icon-btn, body.font-xlarge .icon-btn { width: 50px; height: 50px; min-width: 50px; }

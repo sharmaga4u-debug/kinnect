@@ -9,7 +9,7 @@ const CONFIG_URL = `${APP_URL}config.json`;
 const QUEUE_KEY = 'kinnect_feedback_queue';
 const CONFIG_CACHE_KEY = 'kinnect_remote_config';
 
-export const APP_VERSION = '1.2';
+export const APP_VERSION = '1.3';
 
 async function getConfig() {
   try {

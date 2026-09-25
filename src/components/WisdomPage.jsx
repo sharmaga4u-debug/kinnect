@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ChevronDown, Volume2, Share2, Square } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { shareText } from '../utils/invite';
+import { speak as speakText, stopSpeaking, canSpeak } from '../utils/speech';
 import Avatar from './Avatar';
 import Sheet from './Sheet';
 
@@ -13,16 +14,6 @@ const FILTERS = [
   ['science', 'Science', ['science-nature']],
 ];
 
-function speak(text, onEnd) {
-  if (!window.speechSynthesis) return false;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 0.9;
-  u.onend = onEnd;
-  u.onerror = onEnd;
-  window.speechSynthesis.speak(u);
-  return true;
-}
 
 function shareTextFor(topic) {
   return `📖 ${topic.title}\n${topic.verse.source}\n\n“${topic.verse.meaning}”\n\n💡 ${topic.verse.insight}`;
@@ -38,13 +29,16 @@ export default function WisdomPage() {
   const ids = FILTERS.find(f => f[0] === filter)?.[2];
   const list = topics.filter(t => !ids || ids.includes(t.id));
 
-  function toggleSpeak(topic) {
+  // Works on Android through the phone's own text-to-speech engine
+  async function toggleSpeak(topic) {
     if (speakingId === topic.id) {
-      window.speechSynthesis?.cancel();
+      stopSpeaking();
       setSpeakingId(null);
       return;
     }
-    if (speak(`${topic.verse.meaning}. ${topic.verse.insight}`, () => setSpeakingId(null))) setSpeakingId(topic.id);
+    setSpeakingId(topic.id);
+    await speakText(`${topic.title}. ${topic.verse.meaning} ${topic.verse.insight}`);
+    setSpeakingId(id => (id === topic.id ? null : id));
   }
 
   return (
@@ -99,10 +93,10 @@ export default function WisdomPage() {
                     💡 {topic.verse.insight}
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 14 }}>
-                    <button className="btn btn-ghost btn-sm" onClick={() => toggleSpeak(topic)}>
+                  <div style={{ display: 'grid', gridTemplateColumns: canSpeak ? '1fr 1fr' : '1fr', gap: 8, marginTop: 14 }}>
+                    {canSpeak && <button className="btn btn-ghost btn-sm" onClick={() => toggleSpeak(topic)}>
                       {speakingId === topic.id ? <><Square size={15} /> Stop</> : <><Volume2 size={17} /> Listen</>}
-                    </button>
+                    </button>}
                     <button className="btn btn-ghost btn-sm" onClick={() => setShareTopic(topic)}>
                       <Share2 size={17} /> Share
                     </button>

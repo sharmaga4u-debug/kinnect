@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Send, Mic, MicOff, Phone, Video, ChevronLeft, Check, CheckCheck, Clock, AlertCircle,
+  Send, Mic, Phone, Video, ChevronLeft, Check, CheckCheck, Clock, AlertCircle,
   Sparkles, UserPlus, Users, Share2, Search, MessageSquarePlus, Lock, LogOut, MessageCircle,
+  Play, Pause, Trash2, Volume2, MessageSquareHeart,
 } from 'lucide-react';
-import { useApp, personView, displayName, groupChatKey } from '../context/AppContext';
+import { useApp, personView, displayName, groupChatKey, localTimeIn, differentTimeZone, tzCity } from '../context/AppContext';
 import { LANGUAGES } from '../utils/languageConfig';
-import { useSpeechToText } from '../hooks/useSpeechToText';
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { speak, stopSpeaking, canSpeak } from '../utils/speech';
 import { useBackButton } from '../hooks/useBackButton';
 import { canReadContacts, openAppSettings } from '../services/contacts';
 import { publicKeyFingerprint } from '../services/crypto';
@@ -33,14 +35,43 @@ function listTime(ts) {
   return label === 'Today' ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : label;
 }
 
-function localTimeIn(tz) {
-  try { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: tz }); }
-  catch { return ''; }
-}
-
 function securityCode(pub) {
   const fp = publicKeyFingerprint(pub).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 24);
   return fp.match(/.{1,4}/g)?.join(' ') || '';
+}
+
+function fmtDuration(sec = 0) {
+  return `${Math.floor(sec / 60)}:${String(Math.round(sec) % 60).padStart(2, '0')}`;
+}
+
+/* Voice message bubble content */
+function AudioMessage({ src, duration, mine }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 190, padding: '2px 0' }}>
+      <button
+        onClick={() => { const a = audioRef.current; if (!a) return; if (a.paused) a.play(); else a.pause(); }}
+        aria-label={playing ? 'Pause voice message' : 'Play voice message'}
+        style={{ width: 42, height: 42, minWidth: 42, borderRadius: '50%', border: 'none', cursor: 'pointer', background: mine ? '#0E7490' : '#16A34A', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        {playing ? <Pause size={20} /> : <Play size={20} style={{ marginLeft: 2 }} />}
+      </button>
+      <div style={{ flex: 1 }}>
+        <div style={{ height: 5, borderRadius: 99, background: 'rgba(0,0,0,0.12)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${progress * 100}%`, background: mine ? '#0E7490' : '#16A34A' }} />
+        </div>
+        <p style={{ fontSize: '0.78rem', color: '#64748B', marginTop: 4 }}>🎙️ {fmtDuration(duration)}</p>
+      </div>
+      <audio
+        ref={audioRef} src={src} preload="metadata"
+        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setProgress(0); }}
+        onTimeUpdate={e => setProgress(duration ? Math.min(1, e.currentTarget.currentTime / duration) : 0)}
+      />
+    </div>
+  );
 }
 
 function StatusIcon({ status }) {
@@ -55,6 +86,7 @@ function rowPreview(row, myId) {
   if (!row.last) return row.kind === 'group' ? `${row.group.members.length} members` : '';
   const m = row.last;
   if (m.type === 'system') return m.text;
+  if (m.type === 'audio') return (m.isMe ? 'You: ' : '') + `🎙️ Voice message (${fmtDuration(m.duration)})`;
   const prefix = m.isMe ? 'You: ' : (row.kind === 'group' ? `${(m.senderName || '').split(' ')[0]}: ` : '');
   return prefix + m.text;
 }
@@ -93,7 +125,12 @@ export default function ChatsPage() {
               <button key={row.key} className="list-row" onClick={() => setActiveChatId(row.key)}>
                 <Avatar person={row.view} size={52} />
                 <div className="row-main">
-                  <p className="row-title">{row.view.name}</p>
+                  <p className="row-title">
+                    {row.view.name}
+                    {row.kind === 'person' && differentTimeZone(row.view.timezone) && (
+                      <span style={{ fontWeight: 600, fontSize: '0.78rem', color: 'var(--c-primary)', marginLeft: 6 }}>🕒 {localTimeIn(row.view.timezone)}</span>
+                    )}
+                  </p>
                   <p className="row-sub" style={{ fontWeight: row.unread ? 700 : 500, color: row.unread ? 'var(--c-text-soft)' : undefined }}>
                     {row.last?.isMe && <span style={{ display: 'inline-flex', verticalAlign: '-2px', marginRight: 3 }}><StatusIcon status={row.last.status} /></span>}
                     {rowPreview(row, user.id)}
@@ -139,6 +176,8 @@ export default function ChatsPage() {
         </div>
       )}
 
+      <FeedbackCard />
+
       <button className="fab" onClick={() => setShowNew(true)} aria-label="New chat">
         <MessageSquarePlus size={26} />
       </button>
@@ -154,6 +193,18 @@ export default function ChatsPage() {
         <Conversation key={activeChatId} chatKey={activeChatId} onBack={() => setActiveChatId(null)} />,
         document.body
       )}
+    </div>
+  );
+}
+
+/* Testing phase: keep the feedback form one tap away */
+function FeedbackCard() {
+  const { openFeedback } = useApp();
+  return (
+    <div className="notice" style={{ marginTop: 22, background: '#FDF2F8', borderColor: '#FBCFE8', color: '#9D174D', alignItems: 'center' }}>
+      <MessageSquareHeart size={26} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1 }}><strong>You are trying an early Kinnect.</strong> Tell us what you like and what to fix.</span>
+      <button className="btn btn-sm" style={{ background: '#DB2777', color: '#fff' }} onClick={openFeedback}>Feedback</button>
     </div>
   );
 }
@@ -405,7 +456,7 @@ export function InviteActions({ name, phone }) {
 ═══════════════════════════════════════════════════════════════ */
 function Conversation({ chatKey, onBack }) {
   const {
-    user, people, groups, messagesByChat, sendMessage, startCall,
+    user, people, groups, messagesByChat, sendMessage, requestCall,
     selectedLanguage, setSelectedLanguage,
   } = useApp();
   const close = useBackButton(onBack);
@@ -425,9 +476,17 @@ function Conversation({ chatKey, onBack }) {
   const endRef = useRef(null);
   const firstScroll = useRef(true);
 
-  const { isListening, startListening, stopListening, isSupported } = useSpeechToText(langConfig.speechCode, (finalText) => {
-    setText(prev => (prev ? prev + ' ' : '') + finalText);
-  });
+  const [readingId, setReadingId] = useState(null);
+  const recorder = useVoiceRecorder(({ audio, duration }) => sendMessage(chatKey, '', 'audio', { audio, duration }));
+
+  useEffect(() => () => { stopSpeaking(); }, []);
+
+  async function readAloud(m) {
+    if (readingId === m.id) { stopSpeaking(); setReadingId(null); return; }
+    setReadingId(m.id);
+    await speak(m.text, langConfig.speechCode);
+    setReadingId(id => (id === m.id ? null : id));
+  }
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: firstScroll.current ? 'auto' : 'smooth' });
@@ -442,9 +501,13 @@ function Conversation({ chatKey, onBack }) {
   }
 
   const canCall = !isGroup && person?.registered;
+  // Show their local time right here when they live in another time zone
+  const theirTz = person?.profile?.tz;
   const subtitle = isGroup
     ? (group?.members || []).map(m => (m.id === user.id ? 'You' : m.name.split(' ')[0])).join(', ')
-    : (person?.registered === false && person?.phone ? 'Not on Kinnect' : '🔒 End-to-end encrypted');
+    : person?.registered === false && person?.phone ? 'Not on Kinnect'
+    : differentTimeZone(theirTz) ? `🕒 ${localTimeIn(theirTz)} · ${tzCity(theirTz)}`
+    : '🔒 End-to-end encrypted';
 
   let lastDay = null;
 
@@ -461,8 +524,8 @@ function Conversation({ chatKey, onBack }) {
         </button>
         {canCall && (
           <>
-            <button className="icon-btn" onClick={() => startCall(view, 'video')} aria-label="Video call"><Video size={22} color="var(--c-primary)" /></button>
-            <button className="icon-btn" onClick={() => startCall(view, 'audio')} aria-label="Voice call"><Phone size={20} color="var(--c-primary)" /></button>
+            <button className="icon-btn" onClick={() => requestCall(view, 'video')} aria-label="Video call"><Video size={23} color="var(--c-primary)" /></button>
+            <button className="icon-btn" onClick={() => requestCall(view, 'audio')} aria-label="Voice call"><Phone size={21} color="var(--c-primary)" /></button>
           </>
         )}
       </div>
@@ -485,8 +548,15 @@ function Conversation({ chatKey, onBack }) {
                 <div className={`bubble-row ${m.isMe ? 'me' : 'them'}`}>
                   <div className={`bubble ${m.isMe ? 'me' : 'them'}`}>
                     {isGroup && !m.isMe && <p className="sender">{m.senderName}</p>}
-                    <span className="text">{m.text}</span>
+                    {m.type === 'audio'
+                      ? <AudioMessage src={m.audio} duration={m.duration} mine={m.isMe} />
+                      : <span className="text">{m.text}</span>}
                     <span className="meta">
+                      {!m.isMe && m.type !== 'audio' && canSpeak && (
+                        <button onClick={() => readAloud(m)} aria-label="Read aloud" style={{ background: 'none', border: 'none', padding: '0 4px 0 0', cursor: 'pointer', color: readingId === m.id ? 'var(--c-primary)' : '#94A3B8', display: 'inline-flex' }}>
+                          <Volume2 size={15} />
+                        </button>
+                      )}
                       {m.time}
                       {m.isMe && <StatusIcon status={m.status} />}
                     </span>
@@ -508,44 +578,52 @@ function Conversation({ chatKey, onBack }) {
         </div>
       ) : (
         <>
-          {isListening && (
-            <div style={{ background: '#DCFCE7', padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.84rem', color: '#166534', fontWeight: 700 }}>
-              <span>🎙️ Listening in {langConfig.nativeName}…</span>
-              <button className="pill-btn" onClick={stopListening} style={{ padding: '4px 12px' }}>Done</button>
-            </div>
+          {recorder.error && (
+            <div style={{ background: '#FEF2F2', color: '#991B1B', padding: '8px 14px', fontSize: '0.85rem' }}>{recorder.error}</div>
           )}
-          {showPrompts && (
+          {showPrompts && !recorder.recording && (
             <div style={{ padding: '8px 10px', background: 'var(--c-card)', borderTop: '1px solid var(--c-border)', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
               {(langConfig.quickPrompts || []).map((p, i) => (
                 <button key={i} className="quick-reply-pill" onClick={() => send(p)}>{p}</button>
               ))}
             </div>
           )}
-          <div className="chat-composer">
-            <button className="icon-btn" onClick={() => setShowPrompts(v => !v)} aria-label="Quick messages" style={{ color: showPrompts ? 'var(--c-saffron)' : undefined }}>
-              <Sparkles size={21} />
-            </button>
-            {selectedLanguage !== 'en' && (
-              <button className="icon-btn" onClick={() => setShowKeyboard(v => !v)} aria-label={`${langConfig.nativeName} keyboard`} style={{ fontSize: '1.05rem' }}>
-                {langConfig.flag || '⌨️'}
+          {recorder.recording ? (
+            /* Recording a voice message: big, simple buttons */
+            <div className="chat-composer" style={{ alignItems: 'center' }}>
+              <button className="icon-btn" onClick={recorder.cancel} aria-label="Cancel recording" style={{ color: 'var(--c-red)' }}><Trash2 size={22} /></button>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700, color: 'var(--c-text)' }}>
+                <span className="rec-dot" />
+                Recording {fmtDuration(recorder.seconds)}
+                <span style={{ fontWeight: 500, color: 'var(--c-muted)', fontSize: '0.8rem' }}>max 1 min</span>
+              </div>
+              <button className="send-btn" onClick={recorder.send} aria-label="Send voice message" style={{ width: 52, height: 52 }}><Send size={21} /></button>
+            </div>
+          ) : (
+            <div className="chat-composer">
+              <button className="icon-btn" onClick={() => setShowPrompts(v => !v)} aria-label="Quick messages" style={{ color: showPrompts ? 'var(--c-saffron)' : undefined }}>
+                <Sparkles size={21} />
               </button>
-            )}
-            <textarea
-              className="composer-input"
-              rows={1}
-              value={text}
-              onChange={e => setText(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-              placeholder={isListening ? 'Listening…' : 'Message'}
-            />
-            {text.trim() || !isSupported ? (
-              <button className="send-btn" onClick={() => send()} disabled={!text.trim()} aria-label="Send"><Send size={19} /></button>
-            ) : (
-              <button className="send-btn" onClick={() => (isListening ? stopListening() : startListening())} aria-label="Voice typing" style={{ background: isListening ? '#16A34A' : undefined }}>
-                {isListening ? <MicOff size={20} /> : <Mic size={20} />}
-              </button>
-            )}
-          </div>
+              {selectedLanguage !== 'en' && (
+                <button className="icon-btn" onClick={() => setShowKeyboard(v => !v)} aria-label={`${langConfig.nativeName} keyboard`} style={{ fontSize: '1.05rem' }}>
+                  {langConfig.flag || '⌨️'}
+                </button>
+              )}
+              <textarea
+                className="composer-input"
+                rows={1}
+                value={text}
+                onChange={e => setText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                placeholder="Message"
+              />
+              {text.trim() || !recorder.supported ? (
+                <button className="send-btn" onClick={() => send()} disabled={!text.trim()} aria-label="Send"><Send size={19} /></button>
+              ) : (
+                <button className="send-btn" onClick={recorder.start} aria-label="Record voice message"><Mic size={21} /></button>
+              )}
+            </div>
+          )}
           {showKeyboard && (
             <NativeKeyboard
               languageCode={selectedLanguage}
@@ -569,7 +647,7 @@ function Conversation({ chatKey, onBack }) {
 
 /* ── Contact info ─────────────────────────────────────────── */
 function ContactInfoSheet({ person, onClose }) {
-  const { startCall } = useApp();
+  const { requestCall } = useApp();
   const view = personView(person);
   const code = securityCode(person.profile?.pub);
 
@@ -587,8 +665,8 @@ function ContactInfoSheet({ person, onClose }) {
 
       {person.registered && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 18 }}>
-          <button className="btn btn-ghost" onClick={() => { onClose(); startCall(view, 'audio'); }}><Phone size={18} /> Call</button>
-          <button className="btn btn-ghost" onClick={() => { onClose(); startCall(view, 'video'); }}><Video size={18} /> Video</button>
+          <button className="btn btn-ghost" onClick={() => { onClose(); requestCall(view, 'audio'); }}><Phone size={18} /> Call</button>
+          <button className="btn btn-ghost" onClick={() => { onClose(); requestCall(view, 'video'); }}><Video size={18} /> Video</button>
         </div>
       )}
 

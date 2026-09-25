@@ -359,8 +359,9 @@ class RealtimeService {
         this.stopRingtone();
         this.emit('call_ended', { callId: body.callId, reason: body.t });
         return;
-      case 'doodle':
-        this.emit('doodle_draw', body);
+      case 'act':
+        // Shared activity during a call (drawing, story page, game move, reaction)
+        if (from === this.callPartnerId) this.emit('activity', body);
         return;
       case 'group_invite':
         // Register right away so the group's next message (queued behind this one) can be read
@@ -413,10 +414,14 @@ class RealtimeService {
     }
   }
 
-  // Shared doodle stroke during a call
-  broadcastDoodle(doodleData) {
-    if (!this.callPartnerId) return;
-    this.sendDirect(this.callPartnerId, { t: 'doodle', ...doodleData }, { qos: 0, waitMs: 0 }).catch(() => {});
+  // Shared activity event for the person we're on a call with (encrypted like everything else)
+  sendActivity(data) {
+    const to = this.callPartnerId;
+    if (!to) return;
+    // Queue so moves are encrypted and published in the order they happened
+    this.activityQueue = (this.activityQueue || Promise.resolve())
+      .then(() => this.sendDirect(to, { t: 'act', ...data }, { qos: 1, waitMs: 0 }))
+      .catch(() => {});
   }
 
   // Browser Web Audio synthesized ringtone (Zero external audio file needed!)

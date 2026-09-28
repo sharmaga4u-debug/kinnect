@@ -8,7 +8,7 @@ export default function IncomingCallModal() {
 
   if (!incomingCall) return null;
 
-  const { caller, callType } = incomingCall;
+  const { caller, callType, isGroup, groupName } = incomingCall;
 
   return (
     <div style={{
@@ -51,7 +51,7 @@ export default function IncomingCallModal() {
           letterSpacing: '1.2px',
           marginBottom: 6
         }}>
-          Incoming {callType === 'video' ? 'Video' : 'Voice'} Call...
+          {isGroup ? 'Group ' : 'Incoming '}{callType === 'video' ? 'Video' : 'Voice'} Call...
         </p>
 
         <h2 style={{
@@ -61,7 +61,7 @@ export default function IncomingCallModal() {
           marginBottom: 4,
           color: '#FFFFFF'
         }}>
-          {caller?.name || 'Kinnect user'}
+          {isGroup ? groupName : (caller?.name || 'Kinnect user')}
         </h2>
 
         <p style={{
@@ -70,7 +70,7 @@ export default function IncomingCallModal() {
           fontWeight: 600,
           marginBottom: 32
         }}>
-          🔒 End-to-end encrypted
+          {isGroup ? `${caller?.name} is calling · 🔒 Encrypted` : '🔒 End-to-end encrypted'}
         </p>
 
         {/* Action Buttons */}

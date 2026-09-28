@@ -130,6 +130,7 @@ export function AppProvider({ children }) {
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [peerId, setPeerId] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
+  const [activeGroupCall, setActiveGroupCall] = useState(null);
   const [lateCall, setLateCall] = useState(null);   // call waiting for "they may be asleep" confirmation
   const [lastCall, setLastCall] = useState(null);   // finished call, for the quick "how was it?" prompt
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -679,6 +680,19 @@ export function AppProvider({ children }) {
         }
         setIncomingCall({ ...callData, caller: { ...callData.caller, name: known ? displayName(known) : callData.caller.name, photo: known?.profile?.photo } });
       }),
+      realtime.on('gcall_ring', (b) => {
+        const group = groupsRef.current[b.groupId];
+        if (!group) return;
+        const known = peopleRef.current[b.from];
+        setIncomingCall({
+          isGroup: true, callId: b.callId, callType: b.callType, groupId: b.groupId,
+          caller: { id: b.from, name: known ? displayName(known) : (b.name || 'Someone'), avatar: '👥', photo: known?.profile?.photo },
+          groupName: group.name,
+        });
+        if (document.visibilityState === 'hidden') {
+          notifyNow({ key: `gcall:${b.callId}`, title: `📞 ${group.name}`, body: `Group ${b.callType === 'video' ? 'video' : 'voice'} call — tap to join`, extra: { call: true }, channel: 'alerts' });
+        }
+      }),
       realtime.on('call_ended', () => {
         noteCallFinished();
         setActiveCall(null);
@@ -781,8 +795,28 @@ export function AppProvider({ children }) {
     if (seconds >= 20 && !loadJson(PREFS_KEY, {}).noCallPrompt) setLastCall({ name: call.contact?.name, seconds, type: call.type });
   }, []);
 
+  // Ring every group member; people who answer connect to each other directly
+  const startGroupCall = useCallback((group, type) => {
+    const me = userRef.current;
+    const callId = 'gcall-' + Date.now();
+    const joinedAt = Date.now();
+    setActiveGroupCall({ group, type, callId, joinedAt });
+    realtime.groupCallSignal(group.members.map(m => m.id), {
+      t: 'gcall_ring', callId, callType: type, groupId: group.id, name: me.name,
+    });
+  }, []);
+
+  const endGroupCall = useCallback(() => setActiveGroupCall(null), []);
+
   const answerIncomingCall = useCallback(() => {
     if (!incomingCall) return;
+    if (incomingCall.isGroup) {
+      realtime.stopRingtone();
+      const group = groupsRef.current[incomingCall.groupId];
+      if (group) setActiveGroupCall({ group, type: incomingCall.callType || 'video', callId: incomingCall.callId, joinedAt: Date.now() });
+      setIncomingCall(null);
+      return;
+    }
     const known = peopleRef.current[incomingCall.caller?.id];
     const view = known ? personView(known) : {};
     setActiveCall({
@@ -804,6 +838,7 @@ export function AppProvider({ children }) {
 
   const declineIncomingCall = useCallback(() => {
     if (!incomingCall) return;
+    if (incomingCall.isGroup) { realtime.stopRingtone(); setIncomingCall(null); return; }
     realtime.respondToCall({ callData: incomingCall, accepted: false });
     setIncomingCall(null);
   }, [incomingCall]);
@@ -829,6 +864,7 @@ export function AppProvider({ children }) {
       topics,
       activeCall, incomingCall, startCall, requestCall, answerIncomingCall, declineIncomingCall, endCall,
       lateCall, setLateCall, lastCall, setLastCall,
+      activeGroupCall, startGroupCall, endGroupCall,
       feedbackOpen, openFeedback, closeFeedback: () => setFeedbackOpen(false),
       reactToMessage, deleteMessage, sendTyping, typingByChat, presence, shareLastSeen, setShareLastSeen,
       notificationTapRef,

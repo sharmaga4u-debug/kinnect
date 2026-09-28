@@ -519,7 +519,7 @@ function MessageActions({ m, onClose, onReply, onReact, onDelete, onRead }) {
 
 function Conversation({ chatKey, onBack }) {
   const {
-    user, people, groups, messagesByChat, sendMessage, requestCall,
+    user, people, groups, messagesByChat, sendMessage, requestCall, startGroupCall,
     selectedLanguage, setSelectedLanguage,
     reactToMessage, deleteMessage, sendTyping, typingByChat, presence, shareLastSeen,
   } = useApp();
@@ -623,6 +623,12 @@ function Conversation({ chatKey, onBack }) {
           <>
             <button className="icon-btn" onClick={() => requestCall(view, 'video')} aria-label="Video call"><Video size={23} color="var(--c-primary)" /></button>
             <button className="icon-btn" onClick={() => requestCall(view, 'audio')} aria-label="Voice call"><Phone size={21} color="var(--c-primary)" /></button>
+          </>
+        )}
+        {isGroup && group && group.members.length <= 4 && (
+          <>
+            <button className="icon-btn" onClick={() => startGroupCall(group, 'video')} aria-label="Group video call"><Video size={23} color="var(--c-primary)" /></button>
+            <button className="icon-btn" onClick={() => startGroupCall(group, 'audio')} aria-label="Group voice call"><Phone size={21} color="var(--c-primary)" /></button>
           </>
         )}
       </div>

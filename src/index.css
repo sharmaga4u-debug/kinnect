@@ -758,3 +758,8 @@ body.font-large .icon-btn, body.font-xlarge .icon-btn { width: 50px; height: 50p
 }
 .bubble-row.me .reaction-pill { margin-right: 8px; }
 .bubble-row.them .reaction-pill { margin-left: 8px; }
+
+.call-btn {
+  width: 58px; height: 58px; border-radius: 50%; border: none; cursor: pointer; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}

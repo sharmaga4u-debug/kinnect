@@ -10,6 +10,7 @@ import WisdomPage from './components/WisdomPage';
 import PlayPage from './components/PlayPage';
 import { LateCallSheet, CallRatingSheet } from './components/CallSheets';
 import ActiveVideoCall from './components/ActiveVideoCall';
+import GroupCallScreen from './components/GroupCallScreen';
 import IncomingCallModal from './components/IncomingCallModal';
 import SettingsSheet from './components/SettingsSheet';
 import FeedbackSheet from './components/FeedbackSheet';
@@ -18,7 +19,7 @@ import Avatar from './components/Avatar';
 const TITLES = { chats: 'Chats', calls: 'Calls', play: 'Play together', wisdom: 'Wisdom' };
 
 function AppShell() {
-  const { user, locked, lockApp, activeTab, activeCall, realtimeConnected, feedbackOpen, openFeedback, closeFeedback } = useApp();
+  const { user, locked, lockApp, activeTab, activeCall, activeGroupCall, realtimeConnected, feedbackOpen, openFeedback, closeFeedback } = useApp();
   const [showSettings, setShowSettings] = useState(false);
 
   if (!user) return <Onboarding />;
@@ -30,6 +31,7 @@ function AppShell() {
         <LockScreen />
         <IncomingCallModal />
         {activeCall && <ActiveVideoCall />}
+        {activeGroupCall && <GroupCallScreen />}
       </>
     );
   }
@@ -76,6 +78,7 @@ function AppShell() {
 
       <IncomingCallModal />
       {activeCall && <ActiveVideoCall />}
+      {activeGroupCall && <GroupCallScreen />}
     </div>
   );
 }

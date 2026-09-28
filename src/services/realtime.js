@@ -445,6 +445,18 @@ class RealtimeService {
         this.stopRingtone();
         this.emit('call_ended', { callId: body.callId, reason: body.t });
         return;
+      // Group calls: everyone connects directly to everyone (up to 4 people)
+      case 'gcall_ring':
+        if (Date.now() - (body.ts || 0) > RING_TIMEOUT_MS) return;
+        this.playRingtone();
+        this.emit('gcall_ring', { ...body, from });
+        return;
+      case 'gcall_join':
+        this.emit('gcall_join', { ...body, from });
+        return;
+      case 'gcall_leave':
+        this.emit('gcall_leave', { ...body, from });
+        return;
       case 'act':
         // Shared activity during a call (drawing, story page, game move, reaction)
         if (from === this.callPartnerId) this.emit('activity', body);
@@ -497,6 +509,14 @@ class RealtimeService {
     if (this.activeCallSession) {
       try { this.activeCallSession.close(); } catch (_) {}
       this.activeCallSession = null;
+    }
+  }
+
+  // Send a group-call signal to each member (encrypted per person, like direct messages)
+  groupCallSignal(memberIds, body) {
+    const me = this.currentUser?.id;
+    for (const id of memberIds) {
+      if (id !== me) this.sendDirect(id, body, { qos: 1, waitMs: 5000 }).catch(() => {});
     }
   }
 

@@ -71,7 +71,7 @@ export default function CallsPage() {
                       {streakWith(c.id, calls) >= 2 && <span className="badge badge-amber" style={{ marginLeft: 6, padding: '1px 7px' }}>🔥 {streakWith(c.id, calls)} weeks</span>}
                     </p>
                     {hint ? (
-                      <p className="row-sub" style={{ fontSize: 'calc(0.95rem * var(--app-font-scale))' }}>
+                      <p className="row-sub" style={{ fontSize: 'calc(0.95rem * var(--app-font-scale))', whiteSpace: 'normal' }}>
                         <strong style={{ color: 'var(--c-text-soft)' }}>{localTime(c.timezone)}</strong>
                         <span style={{ color: hint.color }}> · {hint.icon} {hint.text}</span>
                       </p>

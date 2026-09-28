@@ -29,17 +29,17 @@ export default function SimpleHome() {
           ➕ Choose your family members
         </button>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
           {favs.map(p => (
             <div key={p.id} className="simple-tile">
               <button onClick={() => requestCall(p, 'video')} aria-label={`Video call ${p.name}`} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', width: '100%' }}>
-                <Avatar person={p} size={118} style={{ margin: '0 auto', border: '4px solid #fff', boxShadow: '0 6px 18px rgba(0,0,0,0.12)' }} />
+                <Avatar person={p} size={104} style={{ margin: '0 auto', border: '4px solid #fff', boxShadow: '0 6px 18px rgba(0,0,0,0.12)' }} />
                 <p style={{ fontSize: '1.35rem', fontWeight: 800, marginTop: 10, color: 'var(--c-text)' }}>{p.name.split(' ')[0]}</p>
                 {differentTimeZone(p.timezone) && <p style={{ fontSize: '1rem', color: 'var(--c-muted)' }}>🕒 {localTimeIn(p.timezone)} there</p>}
               </button>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, marginTop: 10 }}>
-                <button className="btn btn-green" style={{ minHeight: 56, fontSize: '1.1rem' }} onClick={() => requestCall(p, 'video')}><Video size={24} /> Call</button>
-                <button className="btn btn-ghost" style={{ minHeight: 56, padding: '0 14px' }} onClick={() => { setSimpleMode(false); setTimeout(() => openChat(p.id), 50); }} aria-label={`Message ${p.name}`}><MessageCircle size={24} /></button>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 6, marginTop: 10 }}>
+                <button className="btn btn-green" style={{ minHeight: 56, fontSize: '1.1rem', padding: '0 8px' }} onClick={() => requestCall(p, 'video')}><Video size={24} /> Call</button>
+                <button className="btn btn-ghost" style={{ minHeight: 56, padding: '0 10px' }} onClick={() => { setSimpleMode(false); setTimeout(() => openChat(p.id), 50); }} aria-label={`Message ${p.name}`}><MessageCircle size={24} /></button>
               </div>
             </div>
           ))}

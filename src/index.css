@@ -837,3 +837,20 @@ body.dark .ambient-blob { display: none; }
 .feedback-card { background: #FDF2F8; border-color: #FBCFE8; color: #9D174D; }
 body.dark .enc-note { background: #0F2E36; color: #A5F3FC; }
 body.dark .feedback-card { background: #3A1027; border-color: #831843; color: #FBCFE8; }
+
+/* Polls, shared lists, live location, attach menu */
+.poll-option { position: relative; width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 10px; margin-bottom: 5px; border-radius: 10px; border: 1px solid rgba(14,116,144,0.3); background: rgba(255,255,255,0.6); cursor: pointer; overflow: hidden; font: inherit; color: inherit; text-align: left; }
+.poll-option.mine { border-color: var(--c-primary); }
+.poll-bar { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(14,116,144,0.16); transition: width 0.3s; }
+.poll-label { position: relative; flex: 1; font-weight: 600; }
+.poll-count { position: relative; font-weight: 800; color: var(--c-primary); }
+.list-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 2px; border: none; background: none; cursor: pointer; font: inherit; color: inherit; }
+.list-add-input { flex: 1; min-width: 0; border: 1px solid rgba(0,0,0,0.12); border-radius: 10px; padding: 7px 10px; font: inherit; background: rgba(255,255,255,0.7); color: inherit; }
+.list-add-btn { width: 36px; border-radius: 10px; border: none; background: var(--c-primary); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.loc-card { display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 12px; background: linear-gradient(135deg, #DCFCE7, #CFFAFE); color: #0F172A; }
+.attach-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 6px 0 10px; }
+.attach-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: none; cursor: pointer; font: inherit; font-weight: 700; color: var(--c-text); font-size: 0.86rem; }
+.attach-btn span { width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; }
+body.dark .poll-option, body.dark .list-add-input { background: rgba(255,255,255,0.06); }
+
+.photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }

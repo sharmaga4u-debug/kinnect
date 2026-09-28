@@ -55,7 +55,7 @@ function loadJson(key, fallback) {
 }
 
 // Optional fields a message can carry (voice note, photo, reply, recorded story)
-const MESSAGE_FIELDS = ['audio', 'duration', 'image', 'imgW', 'imgH', 'title', 'replyTo', 'lang'];
+const MESSAGE_FIELDS = ['audio', 'duration', 'image', 'imgW', 'imgH', 'title', 'replyTo', 'lang', 'poll', 'list', 'loc'];
 function pickMessageFields(src) {
   const out = {};
   for (const f of MESSAGE_FIELDS) if (src[f] !== undefined) out[f] = src[f];
@@ -69,7 +69,22 @@ export function messagePreview(m) {
   if (m.type === 'image') return `📷 Photo${m.text ? `: ${m.text}` : ''}`;
   if (m.type === 'audio') return '🎙️ Voice message';
   if (m.type === 'story') return `📖 Story: ${m.title || 'Recorded story'}`;
+  if (m.type === 'poll') return `📊 Poll: ${m.poll?.q || ''}`;
+  if (m.type === 'list') return `📝 List: ${m.list?.title || ''}`;
+  if (m.type === 'location') return '📍 Live location';
   return m.text || '';
+}
+
+// Shared list edits: add an item or tick/untick one (same result on every phone)
+export function applyListOp(list, op) {
+  if (!list || !op) return list;
+  if (op.type === 'add' && op.item?.id && !list.items.some(i => i.id === op.item.id)) {
+    return { ...list, items: [...list.items, { ...op.item, by: op.by }] };
+  }
+  if (op.type === 'toggle') {
+    return { ...list, items: list.items.map(i => (i.id === op.id ? { ...i, done: op.done, doneBy: op.done ? op.by : undefined } : i)) };
+  }
+  return list;
 }
 
 function newMessageId() {
@@ -399,11 +414,13 @@ export function AppProvider({ children }) {
     if (!me || !chatKey) return;
     if (type === 'text' && !text?.trim()) return;
     if ((type === 'audio' || type === 'story') && !extra.audio) return;
+    if (type === 'poll' && !extra.poll?.options?.length) return;
     if (type === 'image' && !extra.image) return;
     const ts = Date.now();
     const msg = { id: newMessageId(), chatKey, senderId: me.id, senderName: me.name, text: (text || '').trim(), type, time: clockTime(ts), timestamp: ts, isMe: true, status: 'pending', ...extra };
     storeMessage(chatKey, msg);
     deliver(chatKey, msg);
+    return msg.id;
   }, [storeMessage, deliver]);
 
   // Change fields of one stored message (reactions, deletion)
@@ -428,6 +445,25 @@ export function AppProvider({ children }) {
       ? realtime.sendGroup(chatKey.slice(2), body).catch(() => {})
       : realtime.sendDirect(chatKey, body, opts).catch(() => {})
   ), []);
+
+  // Polls, shared lists and live location change after they're sent
+  const votePoll = useCallback((chatKey, msgId, option) => {
+    const me = userRef.current;
+    patchMessage(chatKey, msgId, (m) => ({ votes: { ...(m.votes || {}), [me.id]: option } }));
+    sendControl(chatKey, { t: 'vote', msgId, option });
+  }, [patchMessage, sendControl]);
+
+  const editList = useCallback((chatKey, msgId, op) => {
+    const me = userRef.current;
+    const withBy = { ...op, by: me.name };
+    patchMessage(chatKey, msgId, (m) => ({ list: applyListOp(m.list, withBy) }));
+    sendControl(chatKey, { t: 'list_op', msgId, op: withBy });
+  }, [patchMessage, sendControl]);
+
+  const updateLiveLocation = useCallback((chatKey, msgId, loc) => {
+    patchMessage(chatKey, msgId, (m) => ({ loc: { ...m.loc, ...loc } }));
+    sendControl(chatKey, { t: 'loc_update', msgId, loc }, { waitMs: 3000 });
+  }, [patchMessage, sendControl]);
 
   const reactToMessage = useCallback((chatKey, msgId, emoji) => {
     const me = userRef.current;
@@ -612,6 +648,19 @@ export function AppProvider({ children }) {
       if (target && target.senderId === from) {
         patchMessage(chatKey, body.msgId, { deleted: true, text: '', audio: undefined, image: undefined, replyTo: undefined });
       }
+      return true;
+    }
+    if (body.t === 'vote' && body.msgId) {
+      patchMessage(chatKey, body.msgId, (m) => ({ votes: { ...(m.votes || {}), [from]: body.option } }));
+      return true;
+    }
+    if (body.t === 'list_op' && body.msgId) {
+      patchMessage(chatKey, body.msgId, (m) => ({ list: applyListOp(m.list, body.op) }));
+      return true;
+    }
+    if (body.t === 'loc_update' && body.msgId) {
+      const target = messagesByChatRef.current[chatKey]?.find(m => m.id === body.msgId);
+      if (target && target.senderId === from) patchMessage(chatKey, body.msgId, (m) => ({ loc: { ...m.loc, ...body.loc } }));
       return true;
     }
     if (body.t === 'typing') {
@@ -880,7 +929,7 @@ export function AppProvider({ children }) {
       lateCall, setLateCall, lastCall, setLastCall,
       activeGroupCall, startGroupCall, endGroupCall,
       feedbackOpen, openFeedback, closeFeedback: () => setFeedbackOpen(false),
-      reactToMessage, deleteMessage, sendTyping, typingByChat, presence, shareLastSeen, setShareLastSeen,
+      reactToMessage, deleteMessage, sendTyping, votePoll, editList, updateLiveLocation, typingByChat, presence, shareLastSeen, setShareLastSeen,
       notificationTapRef,
       setPrefs: savePrefs, darkMode, setDarkMode,
       remoteStream, setRemoteStream,

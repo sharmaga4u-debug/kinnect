@@ -22,6 +22,8 @@ import NativeKeyboard from './NativeKeyboard';
 import Avatar from './Avatar';
 import Sheet from './Sheet';
 import { ScanQrSheet } from './QrSheets';
+import { PollBubble, ListBubble, LocationBubble, AttachSheet } from './InteractiveMessages';
+import { Paperclip } from 'lucide-react';
 import { QrCode } from 'lucide-react';
 
 /* ── helpers ──────────────────────────────────────────────── */
@@ -568,6 +570,7 @@ function Conversation({ chatKey, onBack }) {
   const [selected, setSelected] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [photoError, setPhotoError] = useState('');
+  const [attaching, setAttaching] = useState(false);
   const [, tick] = useState(0);
   const endRef = useRef(null);
   const firstScroll = useRef(true);
@@ -698,6 +701,9 @@ function Conversation({ chatKey, onBack }) {
                           </div>
                         )}
                         {m.type === 'image' && <ImageMessage m={m} onOpen={setViewing} />}
+                        {m.type === 'poll' && m.poll && <PollBubble m={m} chatKey={chatKey} />}
+                        {m.type === 'list' && m.list && <ListBubble m={m} chatKey={chatKey} />}
+                        {m.type === 'location' && m.loc && <LocationBubble m={m} chatKey={chatKey} />}
                         {(m.type === 'audio' || m.type === 'story') && (
                           <>
                             {m.type === 'story' && <p style={{ fontWeight: 700, marginBottom: 4 }}>📖 {m.title}</p>}
@@ -776,8 +782,8 @@ function Conversation({ chatKey, onBack }) {
               <button className="icon-btn" onClick={() => setShowPrompts(v => !v)} aria-label="Quick messages" style={{ color: showPrompts ? 'var(--c-saffron)' : undefined }}>
                 <Sparkles size={21} />
               </button>
-              <button className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Send a photo">
-                <ImageIcon size={22} />
+              <button className="icon-btn" onClick={() => setAttaching(true)} aria-label="Share photo, poll, list or location">
+                <Paperclip size={22} />
               </button>
               <input ref={fileRef} type="file" accept="image/*" onChange={sendPhoto} style={{ display: 'none' }} />
               {selectedLanguage !== 'en' && (
@@ -825,6 +831,7 @@ function Conversation({ chatKey, onBack }) {
         />
       )}
       {viewing && <ImageViewer src={viewing} onClose={() => setViewing(null)} />}
+      {attaching && <AttachSheet chatKey={chatKey} onClose={() => setAttaching(false)} onPhoto={() => fileRef.current?.click()} />}
 
       {showInfo && (isGroup
         ? <GroupInfoSheet group={group} onClose={() => setShowInfo(false)} onLeft={onBack} />

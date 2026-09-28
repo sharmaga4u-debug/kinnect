@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { HeartPulse, Pill, Siren, CalendarDays, Clock, Plus, Trash2, BookHeart, Users, Settings2, Mic, Send, Check, Play } from 'lucide-react';
+import { HeartPulse, Pill, Siren, CalendarDays, Clock, Plus, Trash2, BookHeart, Users, Settings2, Mic, Send, Check, Play, Image as ImageIcon } from 'lucide-react';
 import { useApp, personView, displayName, groupChatKey, messagePreview } from '../context/AppContext';
 import { useCare, todayKey } from '../context/CareContext';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
@@ -56,6 +56,7 @@ export default function FamilyPage() {
       <WatchingCard />
       <SchedulesCard />
       <CalendarCard />
+      <PhotosCard />
       <StoriesCard />
       <TreeCard />
     </div>
@@ -421,6 +422,42 @@ function EventSheet({ onClose }) {
         </>
       )}
     </Sheet>
+  );
+}
+
+/* ── Family photos: every photo shared in your chats, plus "On this day" ── */
+function PhotosCard() {
+  const { messagesByChat } = useApp();
+  const [open, setOpen] = useState(null);
+  const photos = useMemo(() => Object.values(messagesByChat).flat()
+    .filter(m => m.type === 'image' && m.image && !m.deleted)
+    .sort((a, b) => b.timestamp - a.timestamp), [messagesByChat]);
+  if (!photos.length) return null;
+  const today = new Date();
+  const onThisDay = photos.filter(m => { const d = new Date(m.timestamp); return d.getDate() === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() < today.getFullYear(); });
+
+  return (
+    <Section icon={ImageIcon} color="#2563EB" title={`Family photos · ${photos.length}`}>
+      {onThisDay.length > 0 && (
+        <div className="notice" style={{ marginBottom: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: '1.4rem' }}>🕰️</span>
+          <span><strong>On this day</strong> · {onThisDay.length} photo{onThisDay.length > 1 ? 's' : ''} from {new Date(onThisDay[0].timestamp).getFullYear()}</span>
+        </div>
+      )}
+      <div className="photo-grid">
+        {(onThisDay.length ? [...onThisDay, ...photos.filter(p => !onThisDay.includes(p))] : photos).slice(0, 12).map(m => (
+          <button key={m.id} onClick={() => setOpen(m)} aria-label="Open photo" style={{ padding: 0, border: 'none', cursor: 'pointer', borderRadius: 12, overflow: 'hidden', aspectRatio: '1', background: '#E2E8F0' }}>
+            <img src={m.image} alt="Family photo" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          </button>
+        ))}
+      </div>
+      {open && (
+        <Sheet title={open.isMe ? 'Shared by you' : `From ${open.senderName}`} onClose={() => setOpen(null)}>
+          <img src={open.image} alt="Family photo" style={{ width: '100%', borderRadius: 14 }} />
+          <p className="row-sub" style={{ marginTop: 8 }}>{new Date(open.timestamp).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' })}{open.text ? ` · ${open.text}` : ''}</p>
+        </Sheet>
+      )}
+    </Section>
   );
 }
 

@@ -21,6 +21,8 @@ import { formatPhone, splitPhone } from '../utils/phone';
 import NativeKeyboard from './NativeKeyboard';
 import Avatar from './Avatar';
 import Sheet from './Sheet';
+import { ScanQrSheet } from './QrSheets';
+import { QrCode } from 'lucide-react';
 
 /* ── helpers ──────────────────────────────────────────────── */
 
@@ -204,7 +206,7 @@ export default function ChatsPage() {
 function FeedbackCard() {
   const { openFeedback } = useApp();
   return (
-    <div className="notice" style={{ marginTop: 22, background: '#FDF2F8', borderColor: '#FBCFE8', color: '#9D174D', alignItems: 'center' }}>
+    <div className="notice feedback-card" style={{ marginTop: 22, alignItems: 'center' }}>
       <MessageSquareHeart size={26} style={{ flexShrink: 0 }} />
       <span style={{ flex: 1 }}><strong>You are trying an early Kinnect.</strong> Tell us what you like and what to fix.</span>
       <button className="btn btn-sm" style={{ background: '#DB2777', color: '#fff' }} onClick={openFeedback}>Feedback</button>
@@ -254,6 +256,10 @@ function NewChatSheet({ onClose, onOpen }) {
         <InviteActions name={inviteTarget.name} phone={inviteTarget.phone} />
       </Sheet>
     );
+  }
+
+  if (mode === 'scan') {
+    return <ScanQrSheet onClose={onClose} onFound={(r) => (r.registered ? onOpen(r.id) : (setNumberResult(r), setMode('number')))} />;
   }
 
   if (mode === 'number') {
@@ -317,6 +323,7 @@ function NewChatSheet({ onClose, onOpen }) {
         {[
           [Users, 'New group', () => setMode('group')],
           [UserPlus, 'Chat with a number', () => setMode('number')],
+          [QrCode, 'Scan QR code', () => setMode('scan')],
           [Share2, 'Invite a friend to Kinnect', () => shareText(inviteMessage(user.name))],
         ].map(([Icon, label, action]) => (
           <button key={label} className="list-row" onClick={action}>
@@ -654,7 +661,7 @@ function Conversation({ chatKey, onBack }) {
       </div>
 
       <div className="chat-messages">
-        <div className="system-note" style={{ background: '#E0F2FE', color: '#075985' }}>
+        <div className="system-note enc-note">
           <Lock size={11} style={{ display: 'inline', verticalAlign: '-1px' }} /> Messages are end-to-end encrypted. Tap a message to reply or react.
         </div>
 

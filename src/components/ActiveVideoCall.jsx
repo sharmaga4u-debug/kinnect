@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { realtime } from '../services/realtime';
 import Avatar from './Avatar';
 import { ACTIVITIES, ActivityView } from './together/Activities';
+import { bumpStat } from '../services/stats';
 
 const REACTIONS = ['❤️', '😂', '👏', '😘', '🌟', '🎉'];
 
@@ -46,6 +47,7 @@ export default function ActiveVideoCall() {
   /* ── Activities & reactions stay in step on both phones ── */
   function openActivity(id, { broadcast = true } = {}) {
     setActivity(id);
+    if (id) { bumpStat('activities'); if (id === 'diyas') bumpStat('diyas'); }
     setPicking(false);
     if (broadcast) realtime.sendActivity({ id: '_nav', action: { open: id } });
   }
@@ -62,7 +64,10 @@ export default function ActiveVideoCall() {
   }
 
   useEffect(() => realtime.on('activity', (body) => {
-    if (body.id === '_nav') setActivity(body.action.open || null);
+    if (body.id === '_nav') {
+      setActivity(body.action.open || null);
+      if (body.action.open) { bumpStat('activities'); if (body.action.open === 'diyas') bumpStat('diyas'); }
+    }
     if (body.id === '_react') showReaction(body.action.emoji);
   }), []);
 
@@ -82,7 +87,8 @@ export default function ActiveVideoCall() {
     (async () => {
       try {
         if (navigator.mediaDevices?.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: activeCall.type === 'video' });
+          // "Save data on calls" asks the camera for a small, slow picture
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: activeCall.type === 'video' && (JSON.parse(localStorage.getItem('kinnect_prefs') || '{}').lowData ? { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 12 } } : true) });
           currentStream = stream;
           setLocalStream(stream);
           setPermissionStatus('granted');
@@ -188,7 +194,7 @@ export default function ActiveVideoCall() {
 
   return (
     <div className="animate-fadeIn" style={{
-      position: 'fixed', inset: 0, zIndex: 120,
+      position: 'fixed', inset: 0, zIndex: 250, // above sheets (200): a call always stays on top
       background: 'linear-gradient(160deg, #0F172A 0%, #134E4A 100%)',
       display: 'flex', flexDirection: 'column',
       paddingTop: 'env(safe-area-inset-top, 0px)',

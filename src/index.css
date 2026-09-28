@@ -785,3 +785,55 @@ body.font-large .icon-btn, body.font-xlarge .icon-btn { width: 50px; height: 50p
 @keyframes sosPulse { from { filter: brightness(1); } to { filter: brightness(1.15); } }
 .scam-banner { margin: 6px 0; padding: 10px 12px; border-radius: 12px; background: #FEF3C7; color: #92400E; font-size: calc(0.86rem * var(--app-font-scale)); line-height: 1.45; border: 1px solid #FDE68A; }
 .translated { display: block; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(0,0,0,0.12); font-size: 0.92em; }
+
+/* Diwali fireworks */
+.fireworks { position: absolute; inset: 0; pointer-events: none; }
+.fireworks span { position: absolute; bottom: 0; font-size: 2rem; animation: fwUp 1.8s ease-out infinite; }
+@keyframes fwUp { 0% { transform: translateY(0) scale(0.5); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-260px) scale(1.4); opacity: 0; } }
+
+.sticker { aspect-ratio: 1; border-radius: 16px; border: 2px dashed var(--c-border); background: var(--c-surface); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.sticker.got { border: 2px solid #FCD34D; background: #FFFBEB; }
+
+/* ═════════════ Dark theme (Settings → Dark theme) ═════════════ */
+body.dark {
+  --c-bg: #0B1220;
+  --c-card: #151E2E;
+  --c-card-soft: #1A2436;
+  --c-surface: #1C2638;
+  --c-surface-warm: #2A2519;
+  --c-text: #F1F5F9;
+  --c-text-soft: #CBD5E1;
+  --c-muted: #94A3B8;
+  --c-border: #2A3548;
+  --c-primary: #22B8CF;
+  color-scheme: dark;
+  background: var(--c-bg);
+}
+body.dark .app-header, body.dark .nav-bar { background: rgba(21, 30, 46, 0.96); }
+body.dark .card { background: var(--c-card); border-color: var(--c-border); }
+body.dark .list-row + .list-row, body.dark .setting-row { border-top-color: var(--c-border); }
+body.dark .chat-screen { background: #0E1626; }
+body.dark .bubble.me { background: #0E4A55; color: #E6FFFB; }
+body.dark .bubble.them { background: #1E293B; color: var(--c-text); }
+body.dark .bubble .meta { color: #94A3B8; }
+body.dark .composer-input:focus { background: var(--c-surface); }
+body.dark .day-chip { background: #1E293B; }
+body.dark .system-note { background: #3B3413; color: #FDE68A; }
+body.dark .notice { background: #0F2E36; border-color: #155E75; color: #A5F3FC; }
+body.dark .reaction-pill { background: #1E293B; }
+body.dark .reply-quote span { color: #CBD5E1; }
+body.dark .quick-reply-pill { background: #2A2519; border-color: #78350F; color: #FCD34D; }
+body.dark .ok-done { background: #0F2E1A; color: #86EFAC; }
+body.dark .scam-banner { background: #3B2A0A; color: #FCD34D; border-color: #78350F; }
+body.dark .simple-tile, body.dark .sticker { background: var(--c-card); }
+body.dark .sticker.got { background: #2A2519; }
+body.dark .date-chip { background: #0F2E36; }
+body.dark .chip { background: var(--c-card); }
+body.dark .chip.active { color: #fff; }
+body.dark .badge-gray { background: #1E293B; color: #CBD5E1; }
+body.dark .ambient-blob { display: none; }
+
+.enc-note { background: #E0F2FE; color: #075985; }
+.feedback-card { background: #FDF2F8; border-color: #FBCFE8; color: #9D174D; }
+body.dark .enc-note { background: #0F2E36; color: #A5F3FC; }
+body.dark .feedback-card { background: #3A1027; border-color: #831843; color: #FBCFE8; }

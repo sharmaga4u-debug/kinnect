@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Volume2, Square, RotateCcw, Eraser } from 'l
 import { useShared, useActivityEvents, seededRandom } from './useShared';
 import { STORIES } from '../../data/stories';
 import { speak, stopSpeaking, canSpeak } from '../../utils/speech';
+import { WatchTogether, DrawAndGuess, LightDiyas } from './MoreActivities';
 
 /* Every activity takes the same props:
    shared  – true on a call (moves sync to the other phone), false when playing on one phone
@@ -15,6 +16,9 @@ export const ACTIVITIES = [
   { id: 'tictactoe', title: 'Tic-Tac-Toe', emoji: '❌', color: '#2563EB', blurb: 'Classic noughts and crosses' },
   { id: 'memory', title: 'Memory Match', emoji: '🧠', color: '#7C3AED', blurb: 'Find the matching animal pairs' },
   { id: 'snakes', title: 'Snakes & Ladders', emoji: '🐍', color: '#16A34A', blurb: 'Roll the dice, climb the ladders' },
+  { id: 'guess', title: 'Draw & Guess', emoji: '✏️', color: '#0891B2', blurb: 'One draws a secret word, the other guesses' },
+  { id: 'watch', title: 'Watch Together', emoji: '📺', color: '#DC2626', blurb: 'A YouTube video in sync on both phones', callOnly: true },
+  { id: 'diyas', title: 'Light the Diyas', emoji: '🪔', color: '#F59E0B', blurb: 'A festival moment: light diyas together' },
 ];
 
 export function ActivityView({ id, ...props }) {
@@ -23,6 +27,9 @@ export function ActivityView({ id, ...props }) {
   if (id === 'tictactoe') return <TicTacToe {...props} />;
   if (id === 'memory') return <MemoryMatch {...props} />;
   if (id === 'snakes') return <SnakesAndLadders {...props} />;
+  if (id === 'guess') return <DrawAndGuess {...props} />;
+  if (id === 'watch') return <WatchTogether {...props} />;
+  if (id === 'diyas') return <LightDiyas {...props} />;
   return null;
 }
 

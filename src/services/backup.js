@@ -9,7 +9,7 @@ import { storage } from './storage';
 const subtle = globalThis.crypto?.subtle;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-const KEYS = ['kinnect_account_v2', 'kinnect_identity_v2', 'kinnect_prefs', 'kinnect_care'];
+const KEYS = ['kinnect_account_v2', 'kinnect_identity_v2', 'kinnect_prefs', 'kinnect_care', 'kinnect_calls', 'kinnect_stats'];
 
 function toB64(buf) {
   const bytes = new Uint8Array(buf);

@@ -6,6 +6,7 @@ import {
 } from '../services/crypto';
 import { canReadContacts, contactsPermission, readPhoneContacts, requestContactsPermission } from '../services/contacts';
 import { flushFeedback } from '../services/feedback';
+import { logCall } from '../services/stats';
 import { initNotifications, notifyNow, ensureNotificationPermission } from '../services/notify';
 import { normalizePhone, splitPhone, formatPhone } from '../utils/phone';
 import { TOPICS } from '../data/topics';
@@ -118,6 +119,7 @@ export function AppProvider({ children }) {
   const prefs = loadJson(PREFS_KEY, {});
   const [fontScale, setFontScaleState] = useState(prefs.fontScale || 'normal'); // 'normal' | 'large' | 'xlarge'
   const [selectedLanguage, setSelectedLanguageState] = useState(prefs.language || 'en');
+  const [darkMode, setDarkModeState] = useState(!!prefs.dark);
 
   const [activeTab, setActiveTab] = useState('chats');
   const [people, setPeople] = useState({});          // id → person
@@ -161,6 +163,8 @@ export function AppProvider({ children }) {
   };
   const setFontScale = useCallback((v) => { setFontScaleState(v); savePrefs({ fontScale: v }); }, []);
   const setSelectedLanguage = useCallback((v) => { setSelectedLanguageState(v); savePrefs({ language: v }); }, []);
+  const setDarkMode = useCallback((v) => { setDarkModeState(v); savePrefs({ dark: v }); }, []);
+  useEffect(() => { document.body.classList.toggle('dark', darkMode); }, [darkMode]);
 
   useEffect(() => {
     document.body.classList.remove('font-large', 'font-xlarge');
@@ -741,12 +745,15 @@ export function AppProvider({ children }) {
   }, [messagesByChat, unreadByChat, people, groups]);
 
   // Registered people you know (phone contacts or added by number), by name
-  const kinnectContacts = useMemo(() => (
-    Object.values(people)
-      .filter(p => p.registered && (p.source === 'contacts' || p.source === 'manual' || p.contactName))
+  // People on Kinnect you know: saved contacts, added by number, or someone you're chatting with
+  const kinnectContacts = useMemo(() => {
+    const blocked = new Set(loadJson('kinnect_care', {}).blocked || []);
+    return Object.values(people)
+      .filter(p => p.registered && !blocked.has(p.id)
+        && (p.source === 'contacts' || p.source === 'manual' || p.contactName || messagesByChat[p.id]?.some(m => m.type !== 'system')))
       .map(personView)
-      .sort((a, b) => a.name.localeCompare(b.name))
-  ), [people]);
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [people, messagesByChat]);
 
   // Open (or close with null) a conversation; opening marks it read
   const setActiveChatId = useCallback((chatKey) => {
@@ -798,6 +805,7 @@ export function AppProvider({ children }) {
     const call = activeCallRef.current;
     if (!call) return;
     const seconds = Math.round((Date.now() - call.startTime) / 1000);
+    logCall({ withId: call.contact?.id, name: call.contact?.name, seconds, type: call.type });
     if (seconds >= 20 && !loadJson(PREFS_KEY, {}).noCallPrompt) setLastCall({ name: call.contact?.name, seconds, type: call.type });
   }, []);
 
@@ -874,7 +882,7 @@ export function AppProvider({ children }) {
       feedbackOpen, openFeedback, closeFeedback: () => setFeedbackOpen(false),
       reactToMessage, deleteMessage, sendTyping, typingByChat, presence, shareLastSeen, setShareLastSeen,
       notificationTapRef,
-      setPrefs: savePrefs,
+      setPrefs: savePrefs, darkMode, setDarkMode,
       remoteStream, setRemoteStream,
       fontScale, setFontScale,
       selectedLanguage, setSelectedLanguage,

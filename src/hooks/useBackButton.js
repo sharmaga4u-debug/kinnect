@@ -1,62 +1,50 @@
 import { useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 
 /**
- * Lets the Android back button (and browser back) close the top-most screen or sheet.
- * Each layer pushes its own history entry; on back, only the top layer closes.
- * When a layer is closed by a button instead, we step history back ourselves and
- * that pop is ignored, so it can't accidentally close the layer underneath.
+ * Closing the top-most screen or sheet with the Android back button (or Esc on a computer).
+ *
+ * Open layers form a stack; back closes only the top one. On Android the hardware back
+ * button is handled directly through Capacitor. With no layer open, back minimises the app
+ * like other Android apps do.
+ *
+ * (Browser history isn't used: pushing and popping history entries while sheets swap can
+ * step past the app's first page, which on Android closes the app.)
  */
-let programmaticBacks = 0;
-let ignoringPop = false;
-const layers = [];
+const layers = []; // [{ token, onBack }]
+let installed = false;
 
-if (typeof window !== 'undefined') {
-  // Registered once, before any layer listener, so it sees each popstate first
-  window.addEventListener('popstate', () => {
-    if (programmaticBacks > 0) {
-      programmaticBacks--;
-      ignoringPop = true;
-      setTimeout(() => { ignoringPop = false; }, 0);
-    }
-  });
+function closeTop() {
+  const top = layers[layers.length - 1];
+  if (top) { top.onBack.current(); return true; }
+  return false;
+}
+
+async function install() {
+  if (installed || typeof window === 'undefined') return;
+  installed = true;
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTop(); });
+  if (Capacitor.isNativePlatform()) {
+    const { App } = await import('@capacitor/app');
+    App.addListener('backButton', () => { if (!closeTop()) App.minimizeApp(); });
+  }
 }
 
 export function useBackButton(onBack) {
   const token = useRef(Math.random().toString(36).slice(2));
   const onBackRef = useRef(onBack);
   onBackRef.current = onBack;
-  const closedByBack = useRef(false);
 
   useEffect(() => {
-    const myToken = token.current;
-    window.history.pushState({ kinnectLayer: myToken }, '');
-    layers.push(myToken);
-
-    const onPop = () => {
-      if (ignoringPop) return;
-      if (layers[layers.length - 1] !== myToken) return; // only the top layer closes
-      closedByBack.current = true;
-      onBackRef.current();
-    };
-    window.addEventListener('popstate', onPop);
-
+    install();
+    const entry = { token: token.current, onBack: onBackRef };
+    layers.push(entry);
     return () => {
-      window.removeEventListener('popstate', onPop);
-      const i = layers.lastIndexOf(myToken);
+      const i = layers.indexOf(entry);
       if (i !== -1) layers.splice(i, 1);
-      // Closed by a button rather than back → drop our history entry quietly
-      if (!closedByBack.current) {
-        programmaticBacks++;
-        window.history.back();
-      }
     };
   }, []);
 
-  // Close via the button: same path as pressing back
-  return () => {
-    closedByBack.current = true;
-    onBackRef.current();
-    programmaticBacks++;
-    window.history.back();
-  };
+  // Close via a button: same as pressing back
+  return () => onBackRef.current();
 }

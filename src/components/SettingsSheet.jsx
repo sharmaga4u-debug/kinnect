@@ -1,6 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { Camera, Lock, Languages, Type, Share2, MessageSquareHeart, Trash2, ShieldCheck, Contact, Pencil, ChevronRight, DatabaseBackup, Eye, Bell } from 'lucide-react';
 import { BackupSheet } from './BackupSheets';
+import { MyQrSheet } from './QrSheets';
+import { QrCode, Gauge, Moon } from 'lucide-react';
 import { useCare } from '../context/CareContext';
 import { useApp } from '../context/AppContext';
 import { LANGUAGES } from '../utils/languageConfig';
@@ -29,6 +31,10 @@ export default function SettingsSheet({ onClose, onFeedback }) {
   const [note, setNote] = useState('');
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const prefsNow = (() => { try { return JSON.parse(localStorage.getItem('kinnect_prefs') || '{}'); } catch { return {}; } })();
+  const [lowData, setLowData] = useState(!!prefsNow.lowData);
+  const { darkMode, setDarkMode } = useApp();
   const { care, setSimpleMode } = useCare();
   const [notifyPreview, setNotifyPreview] = useState(() => { try { return JSON.parse(localStorage.getItem('kinnect_prefs') || '{}').notifyPreview !== false; } catch { return true; } });
 
@@ -70,6 +76,7 @@ export default function SettingsSheet({ onClose, onFeedback }) {
   }
 
   if (showBackup) return <BackupSheet onClose={() => setShowBackup(false)} />;
+  if (showQr) return <MyQrSheet onClose={() => setShowQr(false)} />;
 
   if (showPrivacy) {
     return (
@@ -118,6 +125,12 @@ export default function SettingsSheet({ onClose, onFeedback }) {
         </button>
       )}
 
+      <button className="setting-row" onClick={() => setShowQr(true)}>
+        <QrCode size={21} color="var(--c-text-soft)" />
+        <span className="label">My QR code<span className="hint">Let family add you by scanning</span></span>
+        <ChevronRight size={18} color="var(--c-muted)" />
+      </button>
+
       <button className="setting-row" onClick={() => { setSimpleMode(true); onClose(); }}>
         <span style={{ fontSize: '1.3rem', width: 21, textAlign: 'center' }}>👵</span>
         <span className="label">Simple mode<span className="hint">Big photos, one-tap video calls, I'm OK and SOS. For grandparents.</span></span>
@@ -150,6 +163,18 @@ export default function SettingsSheet({ onClose, onFeedback }) {
           <input type="checkbox" checked={notifyPreview} onChange={e => { setNotifyPreview(e.target.checked); setPrefs({ notifyPreview: e.target.checked }); }} />
           <span />
         </span>
+      </label>
+
+      <label className="setting-row">
+        <Gauge size={21} color="var(--c-text-soft)" />
+        <span className="label">Save data on calls<span className="hint">Lower video quality for weak or costly internet</span></span>
+        <span className="switch"><input type="checkbox" checked={lowData} onChange={e => { setLowData(e.target.checked); setPrefs({ lowData: e.target.checked }); }} /><span /></span>
+      </label>
+
+      <label className="setting-row">
+        <Moon size={21} color="var(--c-text-soft)" />
+        <span className="label">Dark theme<span className="hint">Easier on the eyes at night</span></span>
+        <span className="switch"><input type="checkbox" checked={darkMode} onChange={e => setDarkMode(e.target.checked)} /><span /></span>
       </label>
 
       <button className="setting-row" onClick={() => setShowBackup(true)}>

@@ -6,6 +6,37 @@ import { useBackButton } from '../hooks/useBackButton';
 import { ACTIVITIES, ActivityView } from './together/Activities';
 import Avatar from './Avatar';
 import Sheet from './Sheet';
+import { STICKERS, getCalls, getStats, bestStreak } from '../services/stats';
+
+function StickerBook() {
+  const { messagesByChat } = useApp();
+  const calls = getCalls();
+  const ctx = {
+    calls, stats: getStats(), best: bestStreak(calls),
+    stories: Object.values(messagesByChat).flat().filter(m => m.type === 'story').length,
+  };
+  const earned = STICKERS.filter(s => s.test(ctx));
+  const [open, setOpen] = useState(null);
+  return (
+    <div className="list-card" style={{ padding: 14, marginTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <p className="row-title">🏅 My sticker book</p>
+        <span className="badge badge-amber">{earned.length} / {STICKERS.length}</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+        {STICKERS.map(s => {
+          const got = earned.includes(s);
+          return (
+            <button key={s.id} onClick={() => setOpen(s)} aria-label={s.title} className={`sticker ${got ? 'got' : ''}`}>
+              <span style={{ fontSize: '1.8rem', filter: got ? 'none' : 'grayscale(1)', opacity: got ? 1 : 0.35 }}>{s.emoji}</span>
+            </button>
+          );
+        })}
+      </div>
+      {open && <p style={{ marginTop: 10, textAlign: 'center', color: 'var(--c-text-soft)' }}><strong>{open.emoji} {open.title}</strong> · {earned.includes(open) ? 'Earned! 🎉' : open.how}</p>}
+    </div>
+  );
+}
 
 export default function PlayPage() {
   const { kinnectContacts, requestCall, setActiveTab } = useApp();
@@ -20,6 +51,8 @@ export default function PlayPage() {
           Start a video call and draw, read a story or play a game. Both of you see the same screen while you talk.
         </p>
       </div>
+
+      <StickerBook />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
         {ACTIVITIES.map(a => (
@@ -37,9 +70,11 @@ export default function PlayPage() {
               <button className="btn btn-primary btn-sm" style={{ minHeight: 46 }} onClick={() => setPickFor(a)}>
                 <Video size={18} /> On a video call
               </button>
-              <button className="btn btn-ghost btn-sm" style={{ minHeight: 46 }} onClick={() => setSolo(a)}>
-                Play here
-              </button>
+              {!a.callOnly && (
+                <button className="btn btn-ghost btn-sm" style={{ minHeight: 46 }} onClick={() => setSolo(a)}>
+                  Play here
+                </button>
+              )}
             </div>
           </div>
         ))}

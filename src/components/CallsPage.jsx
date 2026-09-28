@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Phone, Video, Search } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import Avatar from './Avatar';
+import { getCalls, streakWith } from '../services/stats';
 
 function localTime(tz) {
   try { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: tz }); }
@@ -33,6 +34,7 @@ export default function CallsPage() {
     return () => clearInterval(t);
   }, []);
 
+  const calls = getCalls();
   const q = query.trim().toLowerCase();
   const list = kinnectContacts.filter(c => !q || c.name.toLowerCase().includes(q));
 
@@ -64,7 +66,10 @@ export default function CallsPage() {
                 <div key={c.id} className="list-row" style={{ cursor: 'default' }}>
                   <Avatar person={c} size={50} />
                   <div className="row-main">
-                    <p className="row-title">{c.name}</p>
+                    <p className="row-title">
+                      {c.name}
+                      {streakWith(c.id, calls) >= 2 && <span className="badge badge-amber" style={{ marginLeft: 6, padding: '1px 7px' }}>🔥 {streakWith(c.id, calls)} weeks</span>}
+                    </p>
                     {hint ? (
                       <p className="row-sub" style={{ fontSize: 'calc(0.95rem * var(--app-font-scale))' }}>
                         <strong style={{ color: 'var(--c-text-soft)' }}>{localTime(c.timezone)}</strong>
@@ -82,6 +87,23 @@ export default function CallsPage() {
               );
             })}
           </div>
+
+          {calls.length > 0 && (
+            <>
+              <p className="section-label">Recent calls</p>
+              <div className="list-card">
+                {calls.slice(0, 8).map((call, i) => (
+                  <div key={i} className="list-row" style={{ cursor: 'default' }}>
+                    <span style={{ fontSize: '1.3rem' }}>{call.type === 'video' ? '📹' : '📞'}</span>
+                    <div className="row-main">
+                      <p className="row-title">{call.name}</p>
+                      <p className="row-sub">{new Date(call.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })} · {Math.max(1, Math.round(call.seconds / 60))} min</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

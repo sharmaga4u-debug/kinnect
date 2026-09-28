@@ -61,7 +61,7 @@ export default function GroupCallScreen() {
     let stream;
     (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo && (JSON.parse(localStorage.getItem('kinnect_prefs') || '{}').lowData ? { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 12 } } : true) });
         localRef.current = stream;
         setLocal(stream);
         // Tell everyone we're here; people already in the call will connect to us
@@ -116,7 +116,7 @@ export default function GroupCallScreen() {
   const clock = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 120, background: 'linear-gradient(160deg,#0F172A,#134E4A)', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 250 /* above sheets (200): a call always stays on top */, background: 'linear-gradient(160deg,#0F172A,#134E4A)', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
       <div style={{ padding: '12px 16px' }}>
         <p style={{ color: '#fff', fontWeight: 800, fontSize: '1.2rem' }}>{group.name}</p>
         <p style={{ color: 'rgba(255,255,255,.65)', fontSize: '0.84rem', display: 'flex', alignItems: 'center', gap: 6 }}>

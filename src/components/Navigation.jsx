@@ -1,10 +1,11 @@
 import React from 'react';
-import { MessageSquare, Phone, BookOpen, Gamepad2 } from 'lucide-react';
+import { MessageSquare, Phone, BookOpen, Gamepad2, HeartHandshake } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const TABS = [
   { id: 'chats',  label: 'Chats',  Icon: MessageSquare },
   { id: 'calls',  label: 'Calls',  Icon: Phone },
+  { id: 'family', label: 'Family', Icon: HeartHandshake },
   { id: 'play',   label: 'Play',   Icon: Gamepad2 },
   { id: 'wisdom', label: 'Wisdom', Icon: BookOpen },
 ];

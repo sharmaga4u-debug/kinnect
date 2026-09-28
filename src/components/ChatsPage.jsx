@@ -7,6 +7,9 @@ import {
 } from 'lucide-react';
 import { useApp, personView, displayName, groupChatKey, localTimeIn, differentTimeZone, tzCity, messagePreview } from '../context/AppContext';
 import { resizePhoto } from '../utils/image';
+import { useCare } from '../context/CareContext';
+import { translateText, canTranslate, translationAvailable, TRANSLATABLE } from '../services/translate';
+import { Languages, Ban } from 'lucide-react';
 import { LANGUAGES } from '../utils/languageConfig';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { speak, stopSpeaking, canSpeak } from '../utils/speech';
@@ -466,6 +469,21 @@ function lastSeenText(ts) {
 
 const QUICK_REACTIONS = ['❤️', '😂', '👍', '🙏', '😮', '😢'];
 
+// Words scammers use; a warning shows when someone not in your contacts sends them
+const SCAM_WORDS = /\b(otp|one[- ]time password|upi|pin|cvv|kyc|bank|account (is )?(blocked|suspended)|lottery|prize|winner|gift card|refund|transfer|password|aadhaar|pan card|urgent(ly)? (need|pay)|send money)\b/i;
+
+/* The message in my language, shown under the original */
+function TranslatedText({ m, to }) {
+  const [out, setOut] = useState(null);
+  useEffect(() => {
+    let live = true;
+    translateText(m.text, m.lang, to).then(t => { if (live) setOut(t); });
+    return () => { live = false; };
+  }, [m.text, m.lang, to]);
+  if (!out || out === m.text) return null;
+  return <span className="translated">🌐 {out}</span>;
+}
+
 /* Photo inside a bubble; tap to view full screen */
 function ImageMessage({ m, onOpen }) {
   const ratio = m.imgW && m.imgH ? m.imgH / m.imgW : 0.75;
@@ -523,6 +541,8 @@ function Conversation({ chatKey, onBack }) {
     selectedLanguage, setSelectedLanguage,
     reactToMessage, deleteMessage, sendTyping, typingByChat, presence, shareLastSeen,
   } = useApp();
+  const { care } = useCare();
+  const translating = !!care.translate[chatKey];
   const close = useBackButton(onBack);
   const isGroup = chatKey.startsWith('g:');
   const group = isGroup ? groups[chatKey.slice(2)] : null;
@@ -638,6 +658,13 @@ function Conversation({ chatKey, onBack }) {
           <Lock size={11} style={{ display: 'inline', verticalAlign: '-1px' }} /> Messages are end-to-end encrypted. Tap a message to reply or react.
         </div>
 
+        {!isGroup && person && !person.contactName && person.source === 'chat' && (
+          <div className="scam-banner">
+            ⚠️ <strong>{view.name} is not in your contacts.</strong> Never share an OTP, PIN, bank or Aadhaar details, and don't send money to people you don't know.
+            {messages.some(m => !m.isMe && SCAM_WORDS.test(m.text || '')) && <><br /><strong>This chat mentions money or codes — be extra careful.</strong></>}
+          </div>
+        )}
+
         {messages.map(m => {
           const day = dayLabel(m.timestamp);
           const showDay = day !== lastDay;
@@ -671,6 +698,7 @@ function Conversation({ chatKey, onBack }) {
                           </>
                         )}
                         {m.text && m.type !== 'audio' && <span className="text">{m.text}</span>}
+                        {translating && !m.isMe && m.text && m.type !== 'audio' && canTranslate(m.lang, selectedLanguage) && <TranslatedText m={m} to={selectedLanguage} />}
                       </>
                     )}
                     <span className="meta">
@@ -800,7 +828,9 @@ function Conversation({ chatKey, onBack }) {
 
 /* ── Contact info ─────────────────────────────────────────── */
 function ContactInfoSheet({ person, onClose }) {
-  const { requestCall } = useApp();
+  const { requestCall, selectedLanguage } = useApp();
+  const { care, setTranslate, toggleBlock } = useCare();
+  const blocked = care.blocked.includes(person.id);
   const view = personView(person);
   const code = securityCode(person.profile?.pub);
 
@@ -830,6 +860,16 @@ function ContactInfoSheet({ person, onClose }) {
           <strong>{localTimeIn(person.profile.tz)}</strong>
         </div>
       )}
+      <label className="setting-row" style={{ marginTop: 6 }}>
+        <Languages size={20} color="var(--c-primary)" />
+        <span className="label">
+          Translate their messages
+          <span className="hint">{!translationAvailable ? 'Works in the Android app, on your phone (private).'
+            : !TRANSLATABLE.has(selectedLanguage) ? 'Your language is not supported for translation yet.'
+            : 'Into your language, on your phone. First use downloads the language (about 30 MB).'}</span>
+        </span>
+        <span className="switch"><input type="checkbox" checked={!!care.translate[person.id]} disabled={!translationAvailable} onChange={e => setTranslate(person.id, e.target.checked)} /><span /></span>
+      </label>
       {code && (
         <div className="setting-row" style={{ cursor: 'default' }}>
           <Lock size={20} color="var(--c-emerald)" />
@@ -839,6 +879,9 @@ function ContactInfoSheet({ person, onClose }) {
           </span>
         </div>
       )}
+      <button className="setting-row" style={{ color: 'var(--c-red)' }} onClick={() => { if (blocked || window.confirm(`Block ${view.name}? You won't get their messages or calls.`)) toggleBlock(person.id); }}>
+        <Ban size={20} /> <span className="label">{blocked ? `Unblock ${view.name}` : `Block ${view.name}`}</span>
+      </button>
     </Sheet>
   );
 }

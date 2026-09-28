@@ -12,7 +12,7 @@ function pickMimeType() {
  * Record a short voice message. `onDone({ audio: dataUrl, duration })` is called when the
  * recording is sent (not when it's cancelled). Low bitrate keeps a minute under ~250 KB.
  */
-export function useVoiceRecorder(onDone) {
+export function useVoiceRecorder(onDone, maxSeconds = MAX_SECONDS, bitrate = 24000) {
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState('');
@@ -38,7 +38,7 @@ export function useVoiceRecorder(onDone) {
     try {
       stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = pickMimeType();
-      const rec = new MediaRecorder(stream.current, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 24000 });
+      const rec = new MediaRecorder(stream.current, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: bitrate });
       chunks.current = [];
       rec.ondataavailable = (e) => { if (e.data.size) chunks.current.push(e.data); };
       rec.onstop = () => {
@@ -74,12 +74,12 @@ export function useVoiceRecorder(onDone) {
     const t = setInterval(() => {
       const s = Math.floor((Date.now() - startedAt.current) / 1000);
       setSeconds(s);
-      if (s >= MAX_SECONDS) finish(true);
+      if (s >= maxSeconds) finish(true);
     }, 250);
     return () => clearInterval(t);
-  }, [recording, finish]);
+  }, [recording, finish, maxSeconds]);
 
   useEffect(() => () => { keep.current = false; recorder.current?.state === 'recording' && recorder.current.stop(); }, []);
 
-  return { supported, recording, seconds, error, start, send: () => finish(true), cancel: () => finish(false), maxSeconds: MAX_SECONDS };
+  return { supported, recording, seconds, error, start, send: () => finish(true), cancel: () => finish(false), maxSeconds };
 }

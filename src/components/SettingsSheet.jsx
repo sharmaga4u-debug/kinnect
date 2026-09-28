@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Camera, Lock, Languages, Type, Share2, MessageSquareHeart, Trash2, ShieldCheck, Contact, Pencil, ChevronRight, DatabaseBackup, Eye, Bell } from 'lucide-react';
 import { BackupSheet } from './BackupSheets';
+import { useCare } from '../context/CareContext';
 import { useApp } from '../context/AppContext';
 import { LANGUAGES } from '../utils/languageConfig';
 import { resizeImageToDataUrl } from '../utils/image';
@@ -28,6 +29,7 @@ export default function SettingsSheet({ onClose, onFeedback }) {
   const [note, setNote] = useState('');
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
+  const { care, setSimpleMode } = useCare();
   const [notifyPreview, setNotifyPreview] = useState(() => { try { return JSON.parse(localStorage.getItem('kinnect_prefs') || '{}').notifyPreview !== false; } catch { return true; } });
 
   async function handlePhoto(e) {
@@ -115,6 +117,12 @@ export default function SettingsSheet({ onClose, onFeedback }) {
           Remove photo
         </button>
       )}
+
+      <button className="setting-row" onClick={() => { setSimpleMode(true); onClose(); }}>
+        <span style={{ fontSize: '1.3rem', width: 21, textAlign: 'center' }}>👵</span>
+        <span className="label">Simple mode<span className="hint">Big photos, one-tap video calls, I'm OK and SOS. For grandparents.</span></span>
+        <ChevronRight size={18} color="var(--c-muted)" />
+      </button>
 
       {/* App lock */}
       <label className="setting-row">

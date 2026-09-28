@@ -54,7 +54,7 @@ function loadJson(key, fallback) {
 }
 
 // Optional fields a message can carry (voice note, photo, reply, recorded story)
-const MESSAGE_FIELDS = ['audio', 'duration', 'image', 'imgW', 'imgH', 'title', 'replyTo'];
+const MESSAGE_FIELDS = ['audio', 'duration', 'image', 'imgW', 'imgH', 'title', 'replyTo', 'lang'];
 function pickMessageFields(src) {
   const out = {};
   for (const f of MESSAGE_FIELDS) if (src[f] !== undefined) out[f] = src[f];
@@ -95,9 +95,11 @@ export function differentTimeZone(tz) {
   return theirs !== null && mine !== theirs;
 }
 
-// "London" from "Europe/London"
+// "London" from "Europe/London" (old zone names mapped to today's city names)
+const TZ_RENAMES = { Calcutta: 'Kolkata', Saigon: 'Ho Chi Minh', Kiev: 'Kyiv', Rangoon: 'Yangon', Katmandu: 'Kathmandu' };
 export function tzCity(tz) {
-  return (tz || '').split('/').pop().replace(/_/g, ' ');
+  const city = (tz || '').split('/').pop().replace(/_/g, ' ');
+  return TZ_RENAMES[city] || city;
 }
 
 function clockTime(ts) {
@@ -374,7 +376,7 @@ export function AppProvider({ children }) {
   // Encrypt and send one stored message
   const deliver = useCallback(async (chatKey, msg) => {
     const me = userRef.current;
-    const body = { t: 'msg', id: msg.id, text: msg.text, type: msg.type, name: me.name, avatar: me.avatar, ...pickMessageFields(msg) };
+    const body = { t: 'msg', id: msg.id, text: msg.text, type: msg.type, name: me.name, avatar: me.avatar, lang: loadJson(PREFS_KEY, {}).language || 'en', ...pickMessageFields(msg) };
     try {
       if (chatKey.startsWith('g:')) {
         await realtime.sendGroup(chatKey.slice(2), body);
@@ -641,6 +643,7 @@ export function AppProvider({ children }) {
       }),
 
       realtime.on('direct', ({ from, pub, body }) => {
+        if ((loadJson('kinnect_care', {}).blocked || []).includes(from)) return;
         const known = peopleRef.current[from];
         // Someone new messaged us: remember them and follow their profile
         if (!known) {
@@ -757,7 +760,10 @@ export function AppProvider({ children }) {
   }, [setActiveChatId]);
 
   // Notification tapped → open that chat (calls open themselves via the ringing screen)
-  notificationTapRef.current = (extra) => { if (extra?.chatKey) openChat(extra.chatKey); };
+  notificationTapRef.current = (extra) => {
+    if (extra?.chatKey) openChat(extra.chatKey);
+    else if (extra?.screen) setActiveTab(extra.screen);
+  };
 
   // Follow online / last seen for everyone we chat with
   useEffect(() => {

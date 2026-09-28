@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { MessageSquareHeart, Lock } from 'lucide-react';
 import { AppProvider, useApp } from './context/AppContext';
+import { CareProvider, useCare } from './context/CareContext';
+import FamilyPage from './components/FamilyPage';
+import SimpleHome, { SosAlert } from './components/SimpleHome';
 import Onboarding from './components/Onboarding';
 import LockScreen from './components/LockScreen';
 import Navigation from './components/Navigation';
@@ -16,11 +19,12 @@ import SettingsSheet from './components/SettingsSheet';
 import FeedbackSheet from './components/FeedbackSheet';
 import Avatar from './components/Avatar';
 
-const TITLES = { chats: 'Chats', calls: 'Calls', play: 'Play together', wisdom: 'Wisdom' };
+const TITLES = { chats: 'Chats', calls: 'Calls', family: 'Family', play: 'Play together', wisdom: 'Wisdom' };
 
 function AppShell() {
   const { user, locked, lockApp, activeTab, activeCall, activeGroupCall, realtimeConnected, feedbackOpen, openFeedback, closeFeedback } = useApp();
   const [showSettings, setShowSettings] = useState(false);
+  const care = useCare();
 
   if (!user) return <Onboarding />;
 
@@ -32,6 +36,21 @@ function AppShell() {
         <IncomingCallModal />
         {activeCall && <ActiveVideoCall />}
         {activeGroupCall && <GroupCallScreen />}
+        <SosAlert />
+      </>
+    );
+  }
+
+  // Simple mode for grandparents: big photos, one-tap calls, I'm OK and SOS
+  if (care.care.simpleMode) {
+    return (
+      <>
+        <SimpleHome />
+        <LateCallSheet />
+        <IncomingCallModal />
+        {activeCall && <ActiveVideoCall />}
+        {activeGroupCall && <GroupCallScreen />}
+        <SosAlert />
       </>
     );
   }
@@ -60,6 +79,7 @@ function AppShell() {
       <main>
         {activeTab === 'chats'  && <ChatsPage />}
         {activeTab === 'calls'  && <CallsPage />}
+        {activeTab === 'family' && <FamilyPage />}
         {activeTab === 'play'   && <PlayPage />}
         {activeTab === 'wisdom' && <WisdomPage />}
       </main>
@@ -79,6 +99,7 @@ function AppShell() {
       <IncomingCallModal />
       {activeCall && <ActiveVideoCall />}
       {activeGroupCall && <GroupCallScreen />}
+      <SosAlert />
     </div>
   );
 }
@@ -86,7 +107,9 @@ function AppShell() {
 export default function App() {
   return (
     <AppProvider>
-      <AppShell />
+      <CareProvider>
+        <AppShell />
+      </CareProvider>
     </AppProvider>
   );
 }

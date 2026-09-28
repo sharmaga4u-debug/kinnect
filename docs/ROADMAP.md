@@ -1,33 +1,48 @@
 # Kinnect roadmap
 
-**Current state:** 1.3 is with testers. Nothing below starts until their feedback is in.
+**Rule: no paid services.** Everything runs on the phone or on free infrastructure already in use
+(public MQTT relay, PeerJS, GitHub Pages / Releases, Google ML Kit on-device).
 
-## Order of work
+## Built (local, not yet released)
 
-1. **Tester feedback first.** Review what testers report (Google Sheet, see
-   [feedback-sheet.md](feedback-sheet.md)) and fix or change what they ask for before any new feature.
-2. **Then the planned features below, one at a time**, each tested and shipped before the next.
+**Everyday messaging**
+- End-to-end encrypted chats, groups, photos, voice messages, replies, reactions, delete for everyone
+- Typing indicator, online / last seen (can be hidden), delivery ticks, notifications while in background
+- Large messages split into parts (the free relay drops anything over ~250 KB)
+- Polls, shared lists, live location (15 min / 1 h), family photo album with "On this day"
+- Password-encrypted backup file + restore on a new phone (includes the encryption key)
+- Add people from phone contacts, by number, or by QR code; scam warning for strangers; blocking
 
-## Rule: no paid services
+**Calls & playing together**
+- 1:1 and group (up to 4) video/voice calls, encrypted signalling, save-data mode
+- Shared activities on calls: Draw Together, Story Time, Tic-Tac-Toe, Memory Match, Snakes & Ladders,
+  Draw & Guess, Watch Together (YouTube in sync), Light the Diyas; floating reactions
+- Late-night call warning using the other person's time zone; quick call rating
 
-Everything must run free: on the phone itself, or on free infrastructure already in use
-(public MQTT relay, PeerJS, GitHub Pages / Releases). No paid APIs, cloud translation,
-SMS or hosting until this is explicitly revisited.
+**Family & care**
+- Daily "I'm OK" check-in, medicine reminders with a taken log for caregivers, SOS with location + auto-call
+- Scheduled family calls reminded in each person's own time zone, best-time-to-call helper
+- Birthdays & anniversaries, family tree with Hindi/Telugu relation names
+- Recorded bedtime stories and family memories (story library, memory prompts)
+- Simple mode for grandparents; text-size choice at sign-up; dark theme
+- On-device chat translation (ML Kit: en, hi, te, ta, kn, mr, bn, gu), Android app only
 
-## Planned: translation (English ↔ Telugu and other Indian languages)
+**Kids**
+- Sticker book and weekly call streaks
 
-Each person picks their preferred language; Kinnect translates what they receive.
+## Still to do
 
-| Step | What | Effort | Notes |
-|---|---|---|---|
-| 1 | **Chat message translation** | Medium (days) | On-device translation (e.g. Google ML Kit, free, offline after a one-time language download), so messages stay end-to-end encrypted. Show translation with "see original". |
-| 2 | **Voice message translation** | Medium | On-device speech-to-text → translate → read aloud in the listener's language. |
-| 3 | **Live translated subtitles in calls** | Large (1–2 weeks) | Needs a native speech-recognition plugin compatible with Capacitor 8 (the community plugin only targets Capacitor 7 today). Only if it can run free/on-device. |
-| 4 | Live translated *voice* in calls | Very large | Not planned: 3–5 s delay and typically needs paid cloud services. |
+| Item | Notes |
+|---|---|
+| Notifications when the app is fully closed | Needs a push server. Firebase Cloud Messaging is free but needs a tiny sender (e.g. Cloudflare free tier). **Decision needed.** |
+| Kid profile on a parent's tablet | Child account without a phone number, parent-approved contacts |
+| Live translated subtitles in calls | Needs a Capacitor-8 speech-recognition plugin; only if it can run free/on-device |
+| Malayalam translation | Not supported by ML Kit on-device translation |
+| Phone-number verification | SMS is paid; security codes are the current safeguard |
+| Play Store / iPhone app | $25 one-time / $99 per year — outside the no-paid rule for now |
 
-## Known limitations to revisit later
+## Testing notes
 
-- Phone numbers aren't verified by SMS (verification services are paid). Security codes in contact info are the current safeguard.
-- Messages relay through a free public MQTT broker; messages waiting more than ~7 days for an offline person may be lost.
-- Voice *typing* (speech-to-text in the chat box) isn't available in the Android app; the keyboard's mic key covers it.
-- Light theme only; dark mode needs a proper pass.
+Everything above was tested in Chrome with 2–4 simulated phones (automated suites in the scratchpad,
+110+ checks). Not yet tested on a real Android phone: contacts, native notifications and reminders,
+on-device translation, text-to-speech, geolocation, hardware back button.

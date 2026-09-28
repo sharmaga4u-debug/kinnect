@@ -18,6 +18,7 @@ import IncomingCallModal from './components/IncomingCallModal';
 import SettingsSheet from './components/SettingsSheet';
 import FeedbackSheet from './components/FeedbackSheet';
 import Avatar from './components/Avatar';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const TITLES = { chats: 'Chats', calls: 'Calls', family: 'Family', play: 'Play together', wisdom: 'Wisdom' };
 
@@ -106,10 +107,12 @@ function AppShell() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <CareProvider>
-        <AppShell />
-      </CareProvider>
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <CareProvider>
+          <AppShell />
+        </CareProvider>
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

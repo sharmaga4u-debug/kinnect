@@ -123,24 +123,42 @@ export default function ActiveVideoCall() {
       });
     };
 
-    // We answered: the caller's media connection may already be waiting
-    if (realtime.activeCallSession) {
+    // We answered: the caller's media connection may already be waiting.
+    // Only for incoming calls (closed connections are forgotten as soon as they close).
+    if (activeCall.isIncoming && realtime.activeCallSession) {
       const call = realtime.activeCallSession;
-      call.answer(localStream);
-      attach(call);
+      realtime.activeCallSession = null;
+      try {
+        call.answer(localStream);
+        attach(call);
+      } catch (e) {
+        console.warn('[Call] could not answer waiting connection', e);
+      }
     }
 
     // We called: once they accept, call their peer id
-    const unsubAccepted = realtime.on('call_accepted', (data) => {
-      if (data.responder?.peerId && realtime.peer) {
-        attach(realtime.peer.call(data.responder.peerId, localStream));
+    const connectTo = (data) => {
+      if (data?.responder?.peerId && realtime.peer && !callPeerSessionRef.current) {
+        try {
+          attach(realtime.peer.call(data.responder.peerId, localStream));
+        } catch (e) {
+          console.warn('[Call] could not connect media', e);
+        }
       }
-    });
+    };
+    const unsubAccepted = realtime.on('call_accepted', connectTo);
+    // They may have answered before our camera was ready
+    if (!activeCall.isIncoming && realtime.acceptedCall?.callId === realtime.outgoingCallId) connectTo(realtime.acceptedCall);
 
     // Their media connection arrived after we opened the call screen
     const unsubWebRTC = realtime.on('webrtc_call_received', ({ mediaConnection }) => {
-      mediaConnection.answer(localStream);
-      attach(mediaConnection);
+      realtime.activeCallSession = null;
+      try {
+        mediaConnection.answer(localStream);
+        attach(mediaConnection);
+      } catch (e) {
+        console.warn('[Call] could not answer connection', e);
+      }
     });
 
     return () => { unsubAccepted(); unsubWebRTC(); };

@@ -198,6 +198,8 @@ class RealtimeService {
       // Handle incoming WebRTC video/audio call
       this.peer.on('call', (mediaConnection) => {
         this.activeCallSession = mediaConnection;
+        // Forget it once closed, so a later call never tries to answer a dead connection
+        mediaConnection.on('close', () => { if (this.activeCallSession === mediaConnection) this.activeCallSession = null; });
         this.emit('webrtc_call_received', { mediaConnection });
       });
 
@@ -438,11 +440,14 @@ class RealtimeService {
         return;
       case 'call_accept':
         this.stopRingtone();
-        this.emit('call_accepted', { callId: body.callId, responder: { id: from, peerId: body.peerId } });
+        // Remembered too: the call screen may still be starting the camera when this arrives
+        this.acceptedCall = { callId: body.callId, responder: { id: from, peerId: body.peerId } };
+        this.emit('call_accepted', this.acceptedCall);
         return;
       case 'call_decline':
       case 'call_end':
         this.stopRingtone();
+        this.dropCallSession(); // the other side hung up: don't leave a closed connection behind
         this.emit('call_ended', { callId: body.callId, reason: body.t });
         return;
       // Group calls: everyone connects directly to everyone (up to 4 people)
@@ -478,6 +483,8 @@ class RealtimeService {
 
   initiateCall({ targetContact, callType }) {
     const callId = 'call-' + Date.now();
+    this.acceptedCall = null;
+    this.outgoingCallId = callId;
     this.callPartnerId = targetContact.id;
     this.sendDirect(targetContact.id, {
       t: 'call_ring',
@@ -491,6 +498,14 @@ class RealtimeService {
       this.emit('call_ended', { callId, reason: 'unreachable' });
     });
     return { callId };
+  }
+
+  // Close and forget the media connection of a finished call
+  dropCallSession() {
+    if (this.activeCallSession) {
+      try { this.activeCallSession.close(); } catch (_) {}
+      this.activeCallSession = null;
+    }
   }
 
   respondToCall({ callData, accepted }) {

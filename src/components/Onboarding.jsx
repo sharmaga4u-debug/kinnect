@@ -6,6 +6,7 @@ import { resizeImageToDataUrl } from '../utils/image';
 import { canReadContacts, requestContactsPermission } from '../services/contacts';
 import { cryptoAvailable } from '../services/crypto';
 import Avatar from './Avatar';
+import { RestoreSheet } from './BackupSheets';
 
 const AVATARS = ['🙂', '😊', '👵', '👴', '👩', '👨', '👧', '👦', '🧑', '👩‍🦳', '👨‍🦳', '🧕', '🙏', '🌸', '🌟', '🦚'];
 
@@ -37,6 +38,7 @@ export default function Onboarding() {
   const [photo, setPhoto] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   // Accept numbers typed with or without the country code
   const phone = number.trim().startsWith('+')
@@ -106,6 +108,10 @@ export default function Onboarding() {
           </div>
         </div>
         <button className="btn btn-primary btn-full btn-lg" onClick={() => setStep('phone')}>Get started</button>
+        <button onClick={() => setRestoring(true)} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--c-primary)', fontWeight: 700, padding: 10, cursor: 'pointer' }}>
+          Restore from a backup
+        </button>
+        {restoring && <RestoreSheet onClose={() => setRestoring(false)} />}
       </div></div>
     );
   }

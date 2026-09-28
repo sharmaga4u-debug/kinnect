@@ -6,6 +6,7 @@ import {
 } from '../services/crypto';
 import { canReadContacts, contactsPermission, readPhoneContacts, requestContactsPermission } from '../services/contacts';
 import { flushFeedback } from '../services/feedback';
+import { initNotifications, notifyNow, ensureNotificationPermission } from '../services/notify';
 import { normalizePhone, splitPhone, formatPhone } from '../utils/phone';
 import { TOPICS } from '../data/topics';
 
@@ -50,6 +51,24 @@ export function personView(person) {
 function loadJson(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; }
   catch { return fallback; }
+}
+
+// Optional fields a message can carry (voice note, photo, reply, recorded story)
+const MESSAGE_FIELDS = ['audio', 'duration', 'image', 'imgW', 'imgH', 'title', 'replyTo'];
+function pickMessageFields(src) {
+  const out = {};
+  for (const f of MESSAGE_FIELDS) if (src[f] !== undefined) out[f] = src[f];
+  return out;
+}
+
+// Short text for notifications and reply previews
+export function messagePreview(m) {
+  if (!m) return '';
+  if (m.deleted) return 'This message was deleted';
+  if (m.type === 'image') return `📷 Photo${m.text ? `: ${m.text}` : ''}`;
+  if (m.type === 'audio') return '🎙️ Voice message';
+  if (m.type === 'story') return `📖 Story: ${m.title || 'Recorded story'}`;
+  return m.text || '';
 }
 
 function newMessageId() {
@@ -114,6 +133,9 @@ export function AppProvider({ children }) {
   const [lateCall, setLateCall] = useState(null);   // call waiting for "they may be asleep" confirmation
   const [lastCall, setLastCall] = useState(null);   // finished call, for the quick "how was it?" prompt
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [presence, setPresence] = useState({});        // userId → last active timestamp
+  const [typingByChat, setTypingByChat] = useState({}); // chatKey → { name, until }
+  const [shareLastSeen, setShareLastSeenState] = useState(prefs.shareLastSeen !== false);
   const openFeedback = useCallback(() => setFeedbackOpen(true), []);
   const [topics] = useState(TOPICS);
 
@@ -351,8 +373,7 @@ export function AppProvider({ children }) {
   // Encrypt and send one stored message
   const deliver = useCallback(async (chatKey, msg) => {
     const me = userRef.current;
-    const body = { t: 'msg', id: msg.id, text: msg.text, type: msg.type, name: me.name, avatar: me.avatar };
-    if (msg.type === 'audio') Object.assign(body, { audio: msg.audio, duration: msg.duration });
+    const body = { t: 'msg', id: msg.id, text: msg.text, type: msg.type, name: me.name, avatar: me.avatar, ...pickMessageFields(msg) };
     try {
       if (chatKey.startsWith('g:')) {
         await realtime.sendGroup(chatKey.slice(2), body);
@@ -365,17 +386,72 @@ export function AppProvider({ children }) {
     }
   }, [setMessageStatus]);
 
-  // `extra` carries voice-message data: { audio: dataUrl, duration: seconds }
+  // `extra` carries media and replies: { audio, duration } | { image, imgW, imgH } | { replyTo }
   const sendMessage = useCallback((chatKey, text, type = 'text', extra = {}) => {
     const me = userRef.current;
     if (!me || !chatKey) return;
     if (type === 'text' && !text?.trim()) return;
-    if (type === 'audio' && !extra.audio) return;
+    if ((type === 'audio' || type === 'story') && !extra.audio) return;
+    if (type === 'image' && !extra.image) return;
     const ts = Date.now();
     const msg = { id: newMessageId(), chatKey, senderId: me.id, senderName: me.name, text: (text || '').trim(), type, time: clockTime(ts), timestamp: ts, isMe: true, status: 'pending', ...extra };
     storeMessage(chatKey, msg);
     deliver(chatKey, msg);
   }, [storeMessage, deliver]);
+
+  // Change fields of one stored message (reactions, deletion)
+  const patchMessage = useCallback((chatKey, msgId, patch) => {
+    const me = userRef.current;
+    setMessagesByChat(prev => {
+      const list = prev[chatKey];
+      if (!list) return prev;
+      const i = list.findIndex(m => m.id === msgId);
+      if (i === -1) return prev;
+      const updated = { ...list[i], ...(typeof patch === 'function' ? patch(list[i]) : patch) };
+      if (me) storage.saveMessage(`${me.id}-${chatKey}`, updated);
+      const next = list.slice();
+      next[i] = updated;
+      return { ...prev, [chatKey]: next };
+    });
+  }, []);
+
+  // Send a control message (reaction, deletion, typing) to the chat's other side
+  const sendControl = useCallback((chatKey, body, opts) => (
+    chatKey.startsWith('g:')
+      ? realtime.sendGroup(chatKey.slice(2), body).catch(() => {})
+      : realtime.sendDirect(chatKey, body, opts).catch(() => {})
+  ), []);
+
+  const reactToMessage = useCallback((chatKey, msgId, emoji) => {
+    const me = userRef.current;
+    let next = emoji;
+    patchMessage(chatKey, msgId, (m) => {
+      const reactions = { ...(m.reactions || {}) };
+      if (reactions[me.id] === emoji) { delete reactions[me.id]; next = null; } else reactions[me.id] = emoji;
+      return { reactions };
+    });
+    sendControl(chatKey, { t: 'react', msgId, emoji: next });
+  }, [patchMessage, sendControl]);
+
+  const deleteMessage = useCallback((chatKey, msgId) => {
+    patchMessage(chatKey, msgId, { deleted: true, text: '', audio: undefined, image: undefined, replyTo: undefined });
+    sendControl(chatKey, { t: 'delete', msgId });
+  }, [patchMessage, sendControl]);
+
+  // "typing…" (sent at most every 3 seconds, not stored or queued)
+  const lastTypingSent = useRef({});
+  const sendTyping = useCallback((chatKey) => {
+    const now = Date.now();
+    if (now - (lastTypingSent.current[chatKey] || 0) < 3000) return;
+    lastTypingSent.current[chatKey] = now;
+    sendControl(chatKey, { t: 'typing', name: userRef.current?.name }, { qos: 0, waitMs: 0 });
+  }, [sendControl]);
+
+  const setShareLastSeen = useCallback((on) => {
+    setShareLastSeenState(on);
+    savePrefs({ shareLastSeen: on });
+    realtime.setShareLastSeen(on);
+  }, []);
 
   // Retry anything that couldn't be sent (e.g. we were offline)
   const retryPending = useCallback(() => {
@@ -489,10 +565,67 @@ export function AppProvider({ children }) {
     return () => { cancelled = true; };
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Messages, reactions, deletions and typing — same for direct chats and groups.
+  // Returns true if the body was one of these.
+  const handleChatBody = useCallback((chatKey, from, body, senderName) => {
+    if (body.t === 'msg') {
+      const ts = body.ts || Date.now();
+      const msg = {
+        id: body.id, chatKey, senderId: from, senderName: senderName || 'Kinnect user',
+        text: body.text || '', type: body.type || 'text', time: clockTime(ts), timestamp: ts, isMe: false, status: 'received',
+        ...pickMessageFields(body),
+      };
+      const isNew = storeMessage(chatKey, msg);
+      setTypingByChat(prev => (prev[chatKey] ? { ...prev, [chatKey]: null } : prev));
+      // Notify when the app is in the background (or the chat isn't open)
+      if (isNew && (document.visibilityState === 'hidden' || activeChatRef.current !== chatKey)) {
+        const group = chatKey.startsWith('g:') ? groupsRef.current[chatKey.slice(2)] : null;
+        const showText = loadJson(PREFS_KEY, {}).notifyPreview !== false;
+        if (document.visibilityState === 'hidden') {
+          notifyNow({
+            key: `msg:${chatKey}`,
+            title: group ? `${senderName} @ ${group.name}` : senderName,
+            body: showText ? messagePreview(msg) : 'New message',
+            extra: { chatKey },
+          });
+        }
+      }
+      return true;
+    }
+    if (body.t === 'react' && body.msgId) {
+      patchMessage(chatKey, body.msgId, (m) => {
+        const reactions = { ...(m.reactions || {}) };
+        if (body.emoji) reactions[from] = body.emoji; else delete reactions[from];
+        return { reactions };
+      });
+      return true;
+    }
+    if (body.t === 'delete' && body.msgId) {
+      const target = messagesByChatRef.current[chatKey]?.find(m => m.id === body.msgId);
+      if (target && target.senderId === from) {
+        patchMessage(chatKey, body.msgId, { deleted: true, text: '', audio: undefined, image: undefined, replyTo: undefined });
+      }
+      return true;
+    }
+    if (body.t === 'typing') {
+      setTypingByChat(prev => ({ ...prev, [chatKey]: { name: body.name || senderName, until: Date.now() + 4000 } }));
+      return true;
+    }
+    return false;
+  }, [storeMessage, patchMessage]);
+
+  // Tapping a notification opens the right screen
+  const notificationTapRef = useRef(null);
+  useEffect(() => {
+    initNotifications((extra) => notificationTapRef.current?.(extra));
+  }, []);
+
   /* ── Realtime connection ──────────────────────────────────── */
   useEffect(() => {
     if (!user) return;
+    realtime.shareLastSeen = loadJson(PREFS_KEY, {}).shareLastSeen !== false;
     realtime.init(userRef.current);
+    ensureNotificationPermission();
 
     const unsubs = [
       realtime.on('connection_status', ({ connected }) => {
@@ -500,6 +633,7 @@ export function AppProvider({ children }) {
         if (connected) setTimeout(retryPending, 1500);
       }),
       realtime.on('peer_ready', ({ peerId }) => setPeerId(peerId)),
+      realtime.on('presence', ({ id, ts }) => setPresence(prev => ({ ...prev, [id]: ts }))),
       realtime.on('profile', applyProfile),
       realtime.on('profile_removed', ({ id }) => {
         if (peopleRef.current[id]) upsertPerson(id, { registered: false });
@@ -516,14 +650,8 @@ export function AppProvider({ children }) {
           upsertPerson(from, p => ({ profile: { ...p.profile, pub } }));
         }
 
-        if (body.t === 'msg') {
-          const ts = body.ts || Date.now();
-          const stored = storeMessage(from, {
-            id: body.id, chatKey: from, senderId: from, senderName: body.name || displayName(known),
-            text: body.text || '', type: body.type || 'text', time: clockTime(ts), timestamp: ts, isMe: false, status: 'received',
-            ...(body.type === 'audio' ? { audio: body.audio, duration: body.duration } : {}),
-          });
-          if (stored || body.id) realtime.sendDirect(from, { t: 'rcpt', ids: [body.id] }, { waitMs: 3000 }).catch(() => {});
+        if (handleChatBody(from, from, body, known ? displayName(known) : body.name)) {
+          if (body.t === 'msg') realtime.sendDirect(from, { t: 'rcpt', ids: [body.id] }, { waitMs: 3000 }).catch(() => {});
         } else if (body.t === 'rcpt') {
           setMessageStatus(from, body.ids || [], 'delivered');
         } else if (body.t === 'group_invite' && body.group?.id && body.group.key) {
@@ -536,13 +664,8 @@ export function AppProvider({ children }) {
 
       realtime.on('group', ({ groupId, from, body }) => {
         const chatKey = groupChatKey(groupId);
-        if (body.t === 'msg') {
-          const ts = body.ts || Date.now();
-          storeMessage(chatKey, {
-            id: body.id, chatKey, senderId: from, senderName: body.name || displayName(peopleRef.current[from]),
-            text: body.text || '', type: body.type || 'text', time: clockTime(ts), timestamp: ts, isMe: false, status: 'received',
-            ...(body.type === 'audio' ? { audio: body.audio, duration: body.duration } : {}),
-          });
+        if (handleChatBody(chatKey, from, body, body.name || displayName(peopleRef.current[from]))) {
+          // handled
         } else if (body.t === 'group_update' && groupsRef.current[groupId]) {
           saveGroup({ ...groupsRef.current[groupId], members: body.members, name: body.name });
           if (body.left) addSystemNote(chatKey, `${body.left} left the group`);
@@ -551,6 +674,9 @@ export function AppProvider({ children }) {
 
       realtime.on('incoming_call', (callData) => {
         const known = peopleRef.current[callData.caller.id];
+        if (document.visibilityState === 'hidden') {
+          notifyNow({ key: `call:${callData.callId}`, title: `📞 ${known ? displayName(known) : callData.caller.name} is calling`, body: `Incoming ${callData.callType === 'video' ? 'video' : 'voice'} call — tap to open`, extra: { call: true }, channel: 'alerts' });
+        }
         setIncomingCall({ ...callData, caller: { ...callData.caller, name: known ? displayName(known) : callData.caller.name, photo: known?.profile?.photo } });
       }),
       realtime.on('call_ended', () => {
@@ -615,6 +741,22 @@ export function AppProvider({ children }) {
     setActiveTab('chats');
     setActiveChatId(chatKey);
   }, [setActiveChatId]);
+
+  // Notification tapped → open that chat (calls open themselves via the ringing screen)
+  notificationTapRef.current = (extra) => { if (extra?.chatKey) openChat(extra.chatKey); };
+
+  // Follow online / last seen for everyone we chat with
+  useEffect(() => {
+    const ids = Object.keys(messagesByChat).filter(k => !k.startsWith('g:'));
+    if (ids.length) realtime.watchPresence(ids);
+  }, [messagesByChat]);
+
+  // Update our "last seen" when leaving the app
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === 'hidden') realtime.publishPresence(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   /* ── Calls ────────────────────────────────────────────────── */
   const startCall = useCallback((contact, type, activity = null) => {
@@ -688,6 +830,8 @@ export function AppProvider({ children }) {
       activeCall, incomingCall, startCall, requestCall, answerIncomingCall, declineIncomingCall, endCall,
       lateCall, setLateCall, lastCall, setLastCall,
       feedbackOpen, openFeedback, closeFeedback: () => setFeedbackOpen(false),
+      reactToMessage, deleteMessage, sendTyping, typingByChat, presence, shareLastSeen, setShareLastSeen,
+      notificationTapRef,
       setPrefs: savePrefs,
       remoteStream, setRemoteStream,
       fontScale, setFontScale,

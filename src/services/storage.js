@@ -102,6 +102,26 @@ class StorageService {
     });
   }
 
+  // Every message on this phone (for backups)
+  async getAllMessages() {
+    return this._getByScopeRange(IDBKeyRange.lowerBound(''));
+  }
+
+  // Bulk insert (restoring a backup)
+  async putMessages(list) {
+    await this.ready;
+    if (!this.db || !list.length) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = this.db.transaction(MSG_STORE, "readwrite");
+        const store = tx.objectStore(MSG_STORE);
+        for (const m of list) if (m.scope && m.id) store.put(m);
+        tx.oncomplete = resolve;
+        tx.onerror    = resolve;
+      } catch { resolve(); }
+    });
+  }
+
   // Wipe everything stored on this phone (account deletion)
   async clearAll() {
     await this.ready;

@@ -8,6 +8,7 @@ import {
  * Realtime transport over a public MQTT broker. Everything personal is end-to-end encrypted
  * (see crypto.js) before it is published:
  *   kinnect/v2/dir/<userId>   retained public profile: name, avatar, photo, timezone, public key
+ *   kinnect/v2/pres/<userId>  retained "last active" time (only if the user shares last seen)
  *   kinnect/v2/in/<userId>    encrypted direct messages, receipts, group invites, call signalling,
  *                             and group messages (encrypted with the group key, one copy per member)
  * Group messages go to each member's own inbox rather than a shared topic, so the broker holds them
@@ -16,6 +17,10 @@ import {
 const PREFIX = 'kinnect/v2';
 const BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
 const RING_TIMEOUT_MS = 45000;
+// The free public broker drops messages much over ~250 KB, so bigger encrypted payloads
+// (photos, long voice messages, recorded stories) are split into parts and reassembled.
+const CHUNK_CHARS = 120000;
+const CHUNK_TTL_MS = 10 * 60 * 1000;
 
 class RealtimeService {
   constructor() {
@@ -29,9 +34,13 @@ class RealtimeService {
     this.ringInterval = null;
     this.profiles = new Map();   // userId → directory record
     this.watched = new Set();    // userIds whose directory record we follow
+    this.presenceWatched = new Set();
+    this.shareLastSeen = true;
+    this.presenceTimer = null;
     this.groups = new Map();     // groupId → group (with key)
     this.callPartnerId = null;
     this.inbox = Promise.resolve(); // processes incoming messages strictly in order
+    this.partials = new Map();       // messageId → { parts, got, envelope, at }
   }
 
   // Event subscription
@@ -77,9 +86,11 @@ class RealtimeService {
       try { this.peer.destroy(); } catch (_) {}
       this.peer = null;
     }
+    clearInterval(this.presenceTimer);
     this.isConnected = false;
     this.currentUser = null;
     this.watched.clear();
+    this.presenceWatched.clear();
     this.groups.clear();
     this.profiles.clear();
     this.emit('connection_status', { connected: false });
@@ -122,8 +133,10 @@ class RealtimeService {
         this.subscribe([
           `${PREFIX}/in/${me.id}`,
           ...[...this.watched].map(id => `${PREFIX}/dir/${id}`),
+          ...[...this.presenceWatched].map(id => `${PREFIX}/pres/${id}`),
         ]);
         this.publishProfile(this.currentUser);
+        this.startPresence();
       });
 
       this.mqttClient.on('message', (topic, payload) => {
@@ -231,6 +244,38 @@ class RealtimeService {
     this.subscribe(fresh.map(id => `${PREFIX}/dir/${id}`));
   }
 
+  /* ── Presence (online / last seen) ───────────────────────────── */
+
+  publishPresence() {
+    if (!this.mqttClient || !this.isConnected || !this.currentUser) return;
+    const topic = `${PREFIX}/pres/${this.currentUser.id}`;
+    if (!this.shareLastSeen) {
+      this.mqttClient.publish(topic, '', { qos: 0, retain: true });
+      return;
+    }
+    this.mqttClient.publish(topic, JSON.stringify({ ts: Date.now() }), { qos: 0, retain: true });
+  }
+
+  // Refresh "last active" every minute while the app is open and visible
+  startPresence() {
+    clearInterval(this.presenceTimer);
+    this.publishPresence();
+    this.presenceTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') this.publishPresence();
+    }, 60000);
+  }
+
+  setShareLastSeen(on) {
+    this.shareLastSeen = on;
+    this.publishPresence();
+  }
+
+  watchPresence(ids) {
+    const fresh = ids.filter(id => id && id !== this.currentUser?.id && !this.presenceWatched.has(id));
+    fresh.forEach(id => this.presenceWatched.add(id));
+    this.subscribe(fresh.map(id => `${PREFIX}/pres/${id}`));
+  }
+
   getProfile(id) {
     return this.profiles.get(id) || null;
   }
@@ -271,7 +316,36 @@ class RealtimeService {
     const sealed = await encryptJson(key, { ...body, ts: body.ts || Date.now() });
     const envelope = { v: 2, f: me, k: this.identity.publicJwk, ...sealed };
     // mqtt.js queues QoS 1 publishes while disconnected and sends them on reconnect
-    this.mqttClient.publish(`${PREFIX}/in/${toId}`, JSON.stringify(envelope), { qos });
+    this.publishEnvelope(`${PREFIX}/in/${toId}`, envelope, qos);
+  }
+
+  // Publish an encrypted envelope, splitting the ciphertext if it's too big for the broker
+  publishEnvelope(topic, envelope, qos = 1) {
+    const { ct, ...head } = envelope;
+    if (ct.length <= CHUNK_CHARS) {
+      this.mqttClient.publish(topic, JSON.stringify(envelope), { qos });
+      return;
+    }
+    const id = Math.random().toString(36).slice(2, 12);
+    const count = Math.ceil(ct.length / CHUNK_CHARS);
+    for (let i = 0; i < count; i++) {
+      const part = { ...head, pid: id, pi: i, pn: count, ct: ct.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) };
+      this.mqttClient.publish(topic, JSON.stringify(part), { qos: 1 });
+    }
+  }
+
+  // Collect parts of a split envelope; returns the whole envelope once every part is here
+  collectPart(env) {
+    const now = Date.now();
+    for (const [key, p] of this.partials) if (now - p.at > CHUNK_TTL_MS) this.partials.delete(key);
+    const key = `${env.f}:${env.pid}`;
+    const entry = this.partials.get(key) || { parts: new Array(env.pn), got: 0, at: now };
+    if (!entry.parts[env.pi]) { entry.parts[env.pi] = env.ct; entry.got++; }
+    this.partials.set(key, entry);
+    if (entry.got < env.pn) return null;
+    this.partials.delete(key);
+    const { pid: _a, pi: _b, pn: _c, ...head } = env;
+    return { ...head, ct: entry.parts.join('') };
   }
 
   // Encrypt once with the group key, then drop a copy in every other member's inbox
@@ -280,9 +354,9 @@ class RealtimeService {
     if (!this.mqttClient || !group) throw new Error('NO_GROUP');
     const me = this.currentUser.id;
     const sealed = await encryptJson(await groupKeyFor(group.key), { ...body, ts: body.ts || Date.now() });
-    const payload = JSON.stringify({ v: 2, g: groupId, f: me, ...sealed });
+    const envelope = { v: 2, g: groupId, f: me, ...sealed };
     for (const m of members || group.members) {
-      if (m.id !== me) this.mqttClient.publish(`${PREFIX}/in/${m.id}`, payload, { qos: 1 });
+      if (m.id !== me) this.publishEnvelope(`${PREFIX}/in/${m.id}`, envelope, 1);
     }
   }
 
@@ -291,6 +365,14 @@ class RealtimeService {
   async handleMessage(topic, raw) {
     const me = this.currentUser?.id;
     if (!me) return;
+
+    if (topic.startsWith(`${PREFIX}/pres/`)) {
+      const id = topic.slice(`${PREFIX}/pres/`.length);
+      let ts = null;
+      try { ts = raw ? JSON.parse(raw).ts : null; } catch (_) {}
+      this.emit('presence', { id, ts });
+      return;
+    }
 
     if (topic.startsWith(`${PREFIX}/dir/`)) {
       const id = topic.slice(`${PREFIX}/dir/`.length);
@@ -307,9 +389,13 @@ class RealtimeService {
     }
 
     if (!raw) return;
-    const env = JSON.parse(raw);
+    let env = JSON.parse(raw);
 
     if (topic !== `${PREFIX}/in/${me}` || !env.f) return;
+    if (env.pid) {
+      env = this.collectPart(env);
+      if (!env) return; // wait for the remaining parts
+    }
 
     if (env.g) {
       const group = this.groups.get(env.g);

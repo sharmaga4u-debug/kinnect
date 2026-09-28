@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import {
   Send, Mic, Phone, Video, ChevronLeft, Check, CheckCheck, Clock, AlertCircle,
   Sparkles, UserPlus, Users, Share2, Search, MessageSquarePlus, Lock, LogOut, MessageCircle,
-  Play, Pause, Trash2, Volume2, MessageSquareHeart,
+  Play, Pause, Trash2, Volume2, MessageSquareHeart, Reply, Copy, Image as ImageIcon,
 } from 'lucide-react';
-import { useApp, personView, displayName, groupChatKey, localTimeIn, differentTimeZone, tzCity } from '../context/AppContext';
+import { useApp, personView, displayName, groupChatKey, localTimeIn, differentTimeZone, tzCity, messagePreview } from '../context/AppContext';
+import { resizePhoto } from '../utils/image';
 import { LANGUAGES } from '../utils/languageConfig';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { speak, stopSpeaking, canSpeak } from '../utils/speech';
@@ -86,9 +87,8 @@ function rowPreview(row, myId) {
   if (!row.last) return row.kind === 'group' ? `${row.group.members.length} members` : '';
   const m = row.last;
   if (m.type === 'system') return m.text;
-  if (m.type === 'audio') return (m.isMe ? 'You: ' : '') + `🎙️ Voice message (${fmtDuration(m.duration)})`;
   const prefix = m.isMe ? 'You: ' : (row.kind === 'group' ? `${(m.senderName || '').split(' ')[0]}: ` : '');
-  return prefix + m.text;
+  return prefix + messagePreview(m);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -454,10 +454,74 @@ export function InviteActions({ name, phone }) {
 /* ═══════════════════════════════════════════════════════════════
    Conversation
 ═══════════════════════════════════════════════════════════════ */
+function lastSeenText(ts) {
+  if (!ts) return '';
+  const ago = Date.now() - ts;
+  if (ago < 90000) return 'online';
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const day = dayLabel(ts);
+  return `last seen ${day === 'Today' ? 'today' : day === 'Yesterday' ? 'yesterday' : day} at ${time}`;
+}
+
+const QUICK_REACTIONS = ['❤️', '😂', '👍', '🙏', '😮', '😢'];
+
+/* Photo inside a bubble; tap to view full screen */
+function ImageMessage({ m, onOpen }) {
+  const ratio = m.imgW && m.imgH ? m.imgH / m.imgW : 0.75;
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onOpen(m.image); }} aria-label="Open photo"
+      style={{ display: 'block', padding: 0, border: 'none', background: '#E2E8F0', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', width: 230, maxWidth: '100%', aspectRatio: `1 / ${Math.min(1.6, Math.max(0.5, ratio))}`, marginBottom: m.text ? 4 : 0 }}>
+      <img src={m.image} alt="Photo" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+    </button>
+  );
+}
+
+function ImageViewer({ src, onClose }) {
+  const close = useBackButton(onClose);
+  return createPortal(
+    <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.94)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <img src={src} alt="Photo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+      <button className="icon-btn" onClick={close} aria-label="Close photo" style={{ position: 'absolute', top: 'calc(12px + env(safe-area-inset-top, 0px))', right: 12, color: '#fff', background: 'rgba(255,255,255,0.15)' }}>✕</button>
+    </div>,
+    document.body
+  );
+}
+
+/* Reply, react, copy, read aloud, delete */
+function MessageActions({ m, onClose, onReply, onReact, onDelete, onRead }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Sheet title="Message" onClose={onClose}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 4, padding: '4px 0 12px' }}>
+        {QUICK_REACTIONS.map(e => (
+          <button key={e} onClick={() => { onReact(e); onClose(); }} aria-label={`React ${e}`}
+            style={{ width: 50, height: 50, borderRadius: '50%', border: 'none', background: 'var(--c-surface)', fontSize: '1.6rem', cursor: 'pointer' }}>{e}</button>
+        ))}
+      </div>
+      <button className="setting-row" onClick={() => { onReply(); onClose(); }}><Reply size={21} /> <span className="label">Reply</span></button>
+      {m.text && (
+        <button className="setting-row" onClick={async () => { try { await navigator.clipboard.writeText(m.text); setCopied(true); setTimeout(onClose, 500); } catch (_) {} }}>
+          <Copy size={21} /> <span className="label">{copied ? 'Copied ✓' : 'Copy text'}</span>
+        </button>
+      )}
+      {!m.isMe && m.text && canSpeak && (
+        <button className="setting-row" onClick={() => { onRead(); onClose(); }}><Volume2 size={21} /> <span className="label">Read aloud</span></button>
+      )}
+      {m.isMe && (
+        <button className="setting-row" style={{ color: 'var(--c-red)' }} onClick={() => { if (window.confirm('Delete this message for everyone?')) { onDelete(); onClose(); } }}>
+          <Trash2 size={21} /> <span className="label">Delete for everyone</span>
+        </button>
+      )}
+    </Sheet>
+  );
+}
+
 function Conversation({ chatKey, onBack }) {
   const {
     user, people, groups, messagesByChat, sendMessage, requestCall,
     selectedLanguage, setSelectedLanguage,
+    reactToMessage, deleteMessage, sendTyping, typingByChat, presence, shareLastSeen,
   } = useApp();
   const close = useBackButton(onBack);
   const isGroup = chatKey.startsWith('g:');
@@ -473,13 +537,24 @@ function Conversation({ chatKey, onBack }) {
   const [showPrompts, setShowPrompts] = useState(false);
   const [showKeyboard, setShowKeyboard] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [replyTo, setReplyTo] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const [photoError, setPhotoError] = useState('');
+  const [, tick] = useState(0);
   const endRef = useRef(null);
   const firstScroll = useRef(true);
+  const fileRef = useRef(null);
 
   const [readingId, setReadingId] = useState(null);
-  const recorder = useVoiceRecorder(({ audio, duration }) => sendMessage(chatKey, '', 'audio', { audio, duration }));
+  const recorder = useVoiceRecorder(({ audio, duration }) => {
+    sendMessage(chatKey, '', 'audio', { audio, duration, ...(replyTo ? { replyTo } : {}) });
+    setReplyTo(null);
+  });
 
   useEffect(() => () => { stopSpeaking(); }, []);
+  // Re-render every few seconds so "typing…" and "online" expire on time
+  useEffect(() => { const t = setInterval(() => tick(n => n + 1), 3000); return () => clearInterval(t); }, []);
 
   async function readAloud(m) {
     if (readingId === m.id) { stopSpeaking(); setReadingId(null); return; }
@@ -495,19 +570,41 @@ function Conversation({ chatKey, onBack }) {
 
   function send(value = text) {
     if (!value.trim()) return;
-    sendMessage(chatKey, value);
+    sendMessage(chatKey, value, 'text', replyTo ? { replyTo } : {});
     setText('');
+    setReplyTo(null);
     setShowPrompts(false);
   }
 
+  async function sendPhoto(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const { dataUrl, width, height } = await resizePhoto(file);
+      sendMessage(chatKey, text.trim(), 'image', { image: dataUrl, imgW: width, imgH: height, ...(replyTo ? { replyTo } : {}) });
+      setText('');
+      setReplyTo(null);
+      setPhotoError('');
+    } catch {
+      setPhotoError('Could not send that photo. Please try another one.');
+    }
+  }
+
+  function startReply(m) {
+    setReplyTo({ id: m.id, name: m.isMe ? 'You' : (m.senderName || view.name), text: messagePreview(m).slice(0, 120) });
+  }
+
   const canCall = !isGroup && person?.registered;
-  // Show their local time right here when they live in another time zone
   const theirTz = person?.profile?.tz;
-  const subtitle = isGroup
-    ? (group?.members || []).map(m => (m.id === user.id ? 'You' : m.name.split(' ')[0])).join(', ')
-    : person?.registered === false && person?.phone ? 'Not on Kinnect'
-    : differentTimeZone(theirTz) ? `🕒 ${localTimeIn(theirTz)} · ${tzCity(theirTz)}`
-    : '🔒 End-to-end encrypted';
+  const typing = typingByChat[chatKey];
+  const status = typing && typing.until > Date.now()
+    ? (isGroup ? `${(typing.name || '').split(' ')[0]} is typing…` : 'typing…')
+    : isGroup
+      ? (group?.members || []).map(m => (m.id === user.id ? 'You' : m.name.split(' ')[0])).join(', ')
+      : person?.registered === false && person?.phone ? 'Not on Kinnect'
+      : [shareLastSeen ? lastSeenText(presence[chatKey]) : '', differentTimeZone(theirTz) ? `🕒 ${localTimeIn(theirTz)} ${tzCity(theirTz)}` : '']
+        .filter(Boolean).join(' · ') || '🔒 End-to-end encrypted';
 
   let lastDay = null;
 
@@ -519,7 +616,7 @@ function Conversation({ chatKey, onBack }) {
           <Avatar person={view} size={42} />
           <div style={{ minWidth: 0 }}>
             <p className="row-title">{view.name}</p>
-            <p className="row-sub" style={{ fontSize: '0.76rem' }}>{subtitle}</p>
+            <p className="row-sub" style={{ fontSize: '0.78rem', color: status.startsWith('typing') || status.endsWith('typing…') || status.startsWith('online') ? 'var(--c-emerald)' : undefined }}>{status}</p>
           </div>
         </button>
         {canCall && (
@@ -532,13 +629,15 @@ function Conversation({ chatKey, onBack }) {
 
       <div className="chat-messages">
         <div className="system-note" style={{ background: '#E0F2FE', color: '#075985' }}>
-          <Lock size={11} style={{ display: 'inline', verticalAlign: '-1px' }} /> Messages are end-to-end encrypted. Only people in this chat can read them.
+          <Lock size={11} style={{ display: 'inline', verticalAlign: '-1px' }} /> Messages are end-to-end encrypted. Tap a message to reply or react.
         </div>
 
         {messages.map(m => {
           const day = dayLabel(m.timestamp);
           const showDay = day !== lastDay;
           lastDay = day;
+          const reactions = Object.values(m.reactions || {});
+          const counts = reactions.reduce((acc, e) => ({ ...acc, [e]: (acc[e] || 0) + 1 }), {});
           return (
             <React.Fragment key={m.id}>
               {showDay && <div className="day-chip">{day}</div>}
@@ -546,14 +645,31 @@ function Conversation({ chatKey, onBack }) {
                 <div className="system-note">{m.text}</div>
               ) : (
                 <div className={`bubble-row ${m.isMe ? 'me' : 'them'}`}>
-                  <div className={`bubble ${m.isMe ? 'me' : 'them'}`}>
+                  <div className={`bubble ${m.isMe ? 'me' : 'them'}`} onClick={() => !m.deleted && setSelected(m)} style={{ cursor: m.deleted ? 'default' : 'pointer' }}>
                     {isGroup && !m.isMe && <p className="sender">{m.senderName}</p>}
-                    {m.type === 'audio'
-                      ? <AudioMessage src={m.audio} duration={m.duration} mine={m.isMe} />
-                      : <span className="text">{m.text}</span>}
+                    {m.deleted ? (
+                      <span className="text" style={{ fontStyle: 'italic', color: '#64748B' }}>🚫 This message was deleted</span>
+                    ) : (
+                      <>
+                        {m.replyTo && (
+                          <div className="reply-quote">
+                            <strong>{m.replyTo.name}</strong>
+                            <span>{m.replyTo.text}</span>
+                          </div>
+                        )}
+                        {m.type === 'image' && <ImageMessage m={m} onOpen={setViewing} />}
+                        {(m.type === 'audio' || m.type === 'story') && (
+                          <>
+                            {m.type === 'story' && <p style={{ fontWeight: 700, marginBottom: 4 }}>📖 {m.title}</p>}
+                            <AudioMessage src={m.audio} duration={m.duration} mine={m.isMe} />
+                          </>
+                        )}
+                        {m.text && m.type !== 'audio' && <span className="text">{m.text}</span>}
+                      </>
+                    )}
                     <span className="meta">
-                      {!m.isMe && m.type !== 'audio' && canSpeak && (
-                        <button onClick={() => readAloud(m)} aria-label="Read aloud" style={{ background: 'none', border: 'none', padding: '0 4px 0 0', cursor: 'pointer', color: readingId === m.id ? 'var(--c-primary)' : '#94A3B8', display: 'inline-flex' }}>
+                      {!m.isMe && m.type === 'text' && !m.deleted && canSpeak && (
+                        <button onClick={(e) => { e.stopPropagation(); readAloud(m); }} aria-label="Read aloud" style={{ background: 'none', border: 'none', padding: '0 4px 0 0', cursor: 'pointer', color: readingId === m.id ? 'var(--c-primary)' : '#94A3B8', display: 'inline-flex' }}>
                           <Volume2 size={15} />
                         </button>
                       )}
@@ -561,6 +677,11 @@ function Conversation({ chatKey, onBack }) {
                       {m.isMe && <StatusIcon status={m.status} />}
                     </span>
                   </div>
+                  {reactions.length > 0 && (
+                    <div className="reaction-pill">
+                      {Object.entries(counts).map(([e, n]) => <span key={e}>{e}{n > 1 ? n : ''}</span>)}
+                    </div>
+                  )}
                   {m.isMe && m.status === 'failed' && (
                     <span style={{ fontSize: '0.72rem', color: 'var(--c-red)', marginTop: 2 }}>Not delivered: {view.name.split(' ')[0]} isn't on Kinnect</span>
                   )}
@@ -578,8 +699,18 @@ function Conversation({ chatKey, onBack }) {
         </div>
       ) : (
         <>
-          {recorder.error && (
-            <div style={{ background: '#FEF2F2', color: '#991B1B', padding: '8px 14px', fontSize: '0.85rem' }}>{recorder.error}</div>
+          {(recorder.error || photoError) && (
+            <div style={{ background: '#FEF2F2', color: '#991B1B', padding: '8px 14px', fontSize: '0.85rem' }}>{recorder.error || photoError}</div>
+          )}
+          {replyTo && (
+            <div className="reply-bar">
+              <Reply size={18} color="var(--c-primary)" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontWeight: 700, color: 'var(--c-primary)', fontSize: '0.84rem' }}>Replying to {replyTo.name}</p>
+                <p className="row-sub">{replyTo.text}</p>
+              </div>
+              <button className="icon-btn" onClick={() => setReplyTo(null)} aria-label="Cancel reply">✕</button>
+            </div>
           )}
           {showPrompts && !recorder.recording && (
             <div style={{ padding: '8px 10px', background: 'var(--c-card)', borderTop: '1px solid var(--c-border)', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
@@ -604,6 +735,10 @@ function Conversation({ chatKey, onBack }) {
               <button className="icon-btn" onClick={() => setShowPrompts(v => !v)} aria-label="Quick messages" style={{ color: showPrompts ? 'var(--c-saffron)' : undefined }}>
                 <Sparkles size={21} />
               </button>
+              <button className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Send a photo">
+                <ImageIcon size={22} />
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" onChange={sendPhoto} style={{ display: 'none' }} />
               {selectedLanguage !== 'en' && (
                 <button className="icon-btn" onClick={() => setShowKeyboard(v => !v)} aria-label={`${langConfig.nativeName} keyboard`} style={{ fontSize: '1.05rem' }}>
                   {langConfig.flag || '⌨️'}
@@ -613,7 +748,7 @@ function Conversation({ chatKey, onBack }) {
                 className="composer-input"
                 rows={1}
                 value={text}
-                onChange={e => setText(e.target.value)}
+                onChange={e => { setText(e.target.value); if (e.target.value) sendTyping(chatKey); }}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
                 placeholder="Message"
               />
@@ -637,6 +772,18 @@ function Conversation({ chatKey, onBack }) {
           )}
         </>
       )}
+
+      {selected && (
+        <MessageActions
+          m={selected}
+          onClose={() => setSelected(null)}
+          onReply={() => startReply(selected)}
+          onReact={(e) => reactToMessage(chatKey, selected.id, e)}
+          onDelete={() => deleteMessage(chatKey, selected.id)}
+          onRead={() => readAloud(selected)}
+        />
+      )}
+      {viewing && <ImageViewer src={viewing} onClose={() => setViewing(null)} />}
 
       {showInfo && (isGroup
         ? <GroupInfoSheet group={group} onClose={() => setShowInfo(false)} onLeft={onBack} />

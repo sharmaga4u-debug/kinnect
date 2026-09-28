@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { Camera, Lock, Languages, Type, Share2, MessageSquareHeart, Trash2, ShieldCheck, Contact, Pencil, ChevronRight } from 'lucide-react';
+import { Camera, Lock, Languages, Type, Share2, MessageSquareHeart, Trash2, ShieldCheck, Contact, Pencil, ChevronRight, DatabaseBackup, Eye, Bell } from 'lucide-react';
+import { BackupSheet } from './BackupSheets';
 import { useApp } from '../context/AppContext';
 import { LANGUAGES } from '../utils/languageConfig';
 import { resizeImageToDataUrl } from '../utils/image';
@@ -17,6 +18,7 @@ export default function SettingsSheet({ onClose, onFeedback }) {
     user, updateProfile, deleteAccount, enableLock, disableLock,
     selectedLanguage, setSelectedLanguage, fontScale, setFontScale,
     contactsStatus, syncPhoneContacts, askForContacts, kinnectContacts,
+    shareLastSeen, setShareLastSeen, setPrefs,
   } = useApp();
   const fileRef = useRef(null);
   const [editing, setEditing] = useState(false);
@@ -25,6 +27,8 @@ export default function SettingsSheet({ onClose, onFeedback }) {
   const [pinMode, setPinMode] = useState(null); // 'create' | 'confirm-off'
   const [note, setNote] = useState('');
   const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showBackup, setShowBackup] = useState(false);
+  const [notifyPreview, setNotifyPreview] = useState(() => { try { return JSON.parse(localStorage.getItem('kinnect_prefs') || '{}').notifyPreview !== false; } catch { return true; } });
 
   async function handlePhoto(e) {
     const file = e.target.files?.[0];
@@ -62,6 +66,8 @@ export default function SettingsSheet({ onClose, onFeedback }) {
       </div>
     );
   }
+
+  if (showBackup) return <BackupSheet onClose={() => setShowBackup(false)} />;
 
   if (showPrivacy) {
     return (
@@ -119,6 +125,30 @@ export default function SettingsSheet({ onClose, onFeedback }) {
           <span />
         </span>
       </label>
+
+      <label className="setting-row">
+        <Eye size={21} color="var(--c-text-soft)" />
+        <span className="label">Show when I was last online<span className="hint">If off, you won't see others' last seen either</span></span>
+        <span className="switch">
+          <input type="checkbox" checked={shareLastSeen} onChange={e => setShareLastSeen(e.target.checked)} />
+          <span />
+        </span>
+      </label>
+
+      <label className="setting-row">
+        <Bell size={21} color="var(--c-text-soft)" />
+        <span className="label">Show message text in notifications<span className="hint">Turn off on shared phones</span></span>
+        <span className="switch">
+          <input type="checkbox" checked={notifyPreview} onChange={e => { setNotifyPreview(e.target.checked); setPrefs({ notifyPreview: e.target.checked }); }} />
+          <span />
+        </span>
+      </label>
+
+      <button className="setting-row" onClick={() => setShowBackup(true)}>
+        <DatabaseBackup size={21} color="var(--c-primary)" />
+        <span className="label">Back up chats<span className="hint">Encrypted file to keep for a new phone</span></span>
+        <ChevronRight size={18} color="var(--c-muted)" />
+      </button>
 
       {/* Contacts */}
       {canReadContacts && (

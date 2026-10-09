@@ -478,6 +478,9 @@ function lastSeenText(ts) {
 
 const QUICK_REACTIONS = ['❤️', '😂', '👍', '🙏', '😮', '😢'];
 
+// Phones connect directly to each other in group calls; beyond ~8 most phones struggle
+const MAX_GROUP_CALL = 8;
+
 // Words scammers use; a warning shows when someone not in your contacts sends them
 const SCAM_WORDS = /\b(otp|one[- ]time password|upi|pin|cvv|kyc|bank|account (is )?(blocked|suspended)|lottery|prize|winner|gift card|refund|transfer|password|aadhaar|pan card|urgent(ly)? (need|pay)|send money)\b/i;
 
@@ -655,7 +658,7 @@ function Conversation({ chatKey, onBack }) {
             <button className="icon-btn" onClick={() => requestCall(view, 'audio')} aria-label="Voice call"><Phone size={21} color="var(--c-primary)" /></button>
           </>
         )}
-        {isGroup && group && group.members.length <= 4 && (
+        {isGroup && group && group.members.length <= MAX_GROUP_CALL && (
           <>
             <button className="icon-btn" onClick={() => startGroupCall(group, 'video')} aria-label="Group video call"><Video size={23} color="var(--c-primary)" /></button>
             <button className="icon-btn" onClick={() => startGroupCall(group, 'audio')} aria-label="Group voice call"><Phone size={21} color="var(--c-primary)" /></button>
@@ -773,7 +776,7 @@ function Conversation({ chatKey, onBack }) {
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700, color: 'var(--c-text)' }}>
                 <span className="rec-dot" />
                 Recording {fmtDuration(recorder.seconds)}
-                <span style={{ fontWeight: 500, color: 'var(--c-muted)', fontSize: '0.8rem' }}>max 1 min</span>
+                <span style={{ fontWeight: 500, color: 'var(--c-muted)', fontSize: '0.8rem' }}>max {recorder.maxSeconds / 60} min</span>
               </div>
               <button className="send-btn" onClick={recorder.send} aria-label="Send voice message" style={{ width: 52, height: 52 }}><Send size={21} /></button>
             </div>

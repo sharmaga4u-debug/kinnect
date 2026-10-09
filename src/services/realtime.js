@@ -450,7 +450,7 @@ class RealtimeService {
         this.dropCallSession(); // the other side hung up: don't leave a closed connection behind
         this.emit('call_ended', { callId: body.callId, reason: body.t });
         return;
-      // Group calls: everyone connects directly to everyone (up to 4 people)
+      // Group calls: everyone connects directly to everyone (up to 8 people)
       case 'gcall_ring':
         if (Date.now() - (body.ts || 0) > RING_TIMEOUT_MS) return;
         this.playRingtone();

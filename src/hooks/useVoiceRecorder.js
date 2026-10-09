@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const MAX_SECONDS = 60;
+const MAX_SECONDS = 180; // voice messages: up to 3 minutes
 
 function pickMimeType() {
   if (typeof MediaRecorder === 'undefined') return '';
@@ -10,7 +10,7 @@ function pickMimeType() {
 
 /**
  * Record a short voice message. `onDone({ audio: dataUrl, duration })` is called when the
- * recording is sent (not when it's cancelled). Low bitrate keeps a minute under ~250 KB.
+ * recording is sent (not when it's cancelled). Low bitrate keeps a minute around 180 KB; big messages are sent in parts.
  */
 export function useVoiceRecorder(onDone, maxSeconds = MAX_SECONDS, bitrate = 24000) {
   const [recording, setRecording] = useState(false);

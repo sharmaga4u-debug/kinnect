@@ -510,8 +510,8 @@ function StoryRecorderSheet({ onClose }) {
   const [to, setTo] = useState([]);
   const [recorded, setRecorded] = useState(null);
   const [sent, setSent] = useState(false);
-  // 5 minutes at a lower bitrate (speech) keeps stories small enough to send
-  const rec = useVoiceRecorder((r) => setRecorded(r), 300, 16000);
+  // 10 minutes at a lower bitrate (speech) keeps stories small enough to send
+  const rec = useVoiceRecorder((r) => setRecorded(r), 600, 16000);
 
   function send() {
     for (const key of to) sendMessage(key, '', 'story', { audio: recorded.audio, duration: recorded.duration, title: title.trim() || (kind === 'bedtime' ? 'Bedtime story' : 'Family memory') });
@@ -542,7 +542,7 @@ function StoryRecorderSheet({ onClose }) {
             {rec.recording ? (
               <>
                 <p style={{ fontSize: '1.4rem', fontWeight: 800 }}><span className="rec-dot" style={{ display: 'inline-block', marginRight: 8 }} />{Math.floor(rec.seconds / 60)}:{String(rec.seconds % 60).padStart(2, '0')}</p>
-                <p style={{ color: 'var(--c-muted)', fontSize: '0.85rem' }}>Up to 5 minutes</p>
+                <p style={{ color: 'var(--c-muted)', fontSize: '0.85rem' }}>Up to 10 minutes</p>
                 <button className="btn btn-primary" style={{ marginTop: 10 }} onClick={rec.send}><Check size={18} /> Finish</button>
               </>
             ) : recorded ? (

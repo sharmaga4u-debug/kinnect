@@ -14,7 +14,7 @@
 - Add people from phone contacts, by number, or by QR code; scam warning for strangers; blocking
 
 **Calls & playing together**
-- 1:1 and group (up to 4) video/voice calls, encrypted signalling, save-data mode
+- 1:1 and group (up to 8) video/voice calls, encrypted signalling, save-data mode
 - Shared activities on calls: Draw Together, Story Time, Tic-Tac-Toe, Memory Match, Snakes & Ladders,
   Draw & Guess, Watch Together (YouTube in sync), Light the Diyas; floating reactions
 - Late-night call warning using the other person's time zone; quick call rating
@@ -23,7 +23,7 @@
 - Daily "I'm OK" check-in, medicine reminders with a taken log for caregivers, SOS with location + auto-call
 - Scheduled family calls reminded in each person's own time zone, best-time-to-call helper
 - Birthdays & anniversaries, family tree with Hindi/Telugu relation names
-- Recorded bedtime stories and family memories (story library, memory prompts)
+- Recorded bedtime stories and family memories, up to 10 minutes (story library, memory prompts)
 - Simple mode for grandparents; text-size choice at sign-up; dark theme
 - On-device chat translation (ML Kit: en, hi, te, ta, kn, mr, bn, gu), Android app only
 
